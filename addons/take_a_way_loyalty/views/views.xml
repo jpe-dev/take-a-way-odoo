@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <data>
+    <!-- Vues pour Condition Mission -->
+    <record id="view_condition_mission_tree" model="ir.ui.view">
+        <field name="name">take_a_way_loyalty.condition_mission.tree</field>
+        <field name="model">take_a_way_loyalty.condition_mission</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="mission_id"/>
+                <field name="type_condition"/>
+                <field name="produit_id"/>
+                <field name="categorieProduit_id"/>
+                <field name="quantite"/>
+                <field name="montant_minimum"/>
+                <field name="nombre_commandes"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Vues pour Mission User -->
+    <record id="view_mission_user_tree" model="ir.ui.view">
+        <field name="name">take_a_way_loyalty.mission_user.list</field>
+        <field name="model">take_a_way_loyalty.mission_user</field>
+        <field name="arch" type="xml">
+            <list string="Mission User">
+                <field name="utilisateur_id"/>
+                <field name="mission_id"/>
+                <field name="date_debut"/>
+                <field name="progression"/>
+                <field name="etat"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Mission Views -->
+    <record id="view_mission_tree" model="ir.ui.view">
+        <field name="name">take_a_way_loyalty.mission.list</field>
+        <field name="model">take_a_way_loyalty.mission</field>
+        <field name="arch" type="xml">
+            <list string="Mission">
+                <field name="name"/>
+                <field name="point_recompense"/>
+                <field name="debut"/>
+                <field name="fin"/>
+                <field name="cumulable"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Vue form pour Condition Mission -->
+    <record id="view_condition_mission_form" model="ir.ui.view">
+        <field name="name">take_a_way_loyalty.condition_mission.form</field>
+        <field name="model">take_a_way_loyalty.condition_mission</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <field name="mission_id"/>
+                        <field name="type_condition" options="{'no_create': True, 'no_open': True}"/>
+                        <field name="produit_id" 
+                               readonly="type_condition.code != 'ACHAT_PRODUIT'"
+                               required="type_condition.code == 'ACHAT_PRODUIT'"
+                               invisible="type_condition.code != 'ACHAT_PRODUIT'"/>
+                        <field name="categorieProduit_id" 
+                               readonly="type_condition.code != 'CATEGORIE_PRODUIT'"
+                               required="type_condition.code == 'CATEGORIE_PRODUIT'"
+                               invisible="type_condition.code != 'CATEGORIE_PRODUIT'"/>
+                        <field name="quantite" 
+                               invisible="type_condition.code not in ['ACHAT_PRODUIT', 'CATEGORIE_PRODUIT']"/>
+                        <field name="montant_minimum" 
+                               readonly="type_condition.code != 'TOTAL_COMMANDE'"
+                               required="type_condition.code == 'TOTAL_COMMANDE'"
+                               invisible="type_condition.code != 'TOTAL_COMMANDE'"/>
+                        <field name="nombre_commandes" 
+                               readonly="type_condition.code != 'NOMBRE_COMMANDE'"
+                               required="type_condition.code == 'NOMBRE_COMMANDE'"
+                               invisible="type_condition.code != 'NOMBRE_COMMANDE'"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Vue tree pour Mission -->
+    <record id="view_mission_form" model="ir.ui.view">
+        <field name="name">take_a_way_loyalty.mission.form</field>
+        <field name="model">take_a_way_loyalty.mission</field>
+        <field name="arch" type="xml">
+            <form string="Mission">
+                <header>
+                    <button name="ajouter_participant" 
+                            string="Ajouter un participant" 
+                            type="object" 
+                            class="oe_highlight"/>
+                </header>
+                <sheet>
+                    <group>
+                        <field name="name"/>
+                        <field name="description"/>
+                        <field name="point_recompense"/>
+                        <field name="debut"/>
+                        <field name="fin"/>
+                        <field name="cumulable"/>
+                    </group>
+                    <notebook>
+                        <page string="Conditions">
+                            <field name="condition_ids">
+                                <list editable="bottom">
+                                    <field name="type_condition"/>
+                                    <field name="produit_id" 
+                                           readonly="type_condition_code != 'ACHAT_PRODUIT'"
+                                           required="type_condition_code == 'ACHAT_PRODUIT'"
+                                           invisible="type_condition_code != 'ACHAT_PRODUIT'"/>
+                                    <field name="categorieProduit_id" 
+                                           readonly="type_condition_code != 'CATEGORIE_PRODUIT'"
+                                           required="type_condition_code == 'CATEGORIE_PRODUIT'"
+                                           invisible="type_condition_code != 'CATEGORIE_PRODUIT'"/>
+                                    <field name="quantite" 
+                                           invisible="type_condition_code not in ['ACHAT_PRODUIT', 'CATEGORIE_PRODUIT']"/>
+                                    <field name="montant_minimum" 
+                                           readonly="type_condition_code != 'TOTAL_COMMANDE'"
+                                           required="type_condition_code == 'TOTAL_COMMANDE'"
+                                           invisible="type_condition_code != 'TOTAL_COMMANDE'"/>
+                                    <field name="nombre_commandes" 
+                                           readonly="type_condition_code != 'NOMBRE_COMMANDE'"
+                                           required="type_condition_code == 'NOMBRE_COMMANDE'"
+                                           invisible="type_condition_code != 'NOMBRE_COMMANDE'"/>
+                                    <field name="type_condition_code" invisible="1"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Participants">
+                            <field name="mission_user_ids">
+                                <list>
+                                    <field name="utilisateur_id"/>
+                                    <field name="date_debut"/>
+                                    <field name="progression"/>
+                                    <field name="etat"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Vue form pour Mission User -->
+    <record id="view_mission_user_form" model="ir.ui.view">
+        <field name="name">take_a_way_loyalty.mission_user.form</field>
+        <field name="model">take_a_way_loyalty.mission_user</field>
+        <field name="arch" type="xml">
+            <form string="Mission User">
+                <sheet>
+                    <group>
+                        <field name="utilisateur_id"/>
+                        <field name="mission_id"/>
+                        <field name="date_debut"/>
+                        <field name="progression"/>
+                        <field name="etat"/>
+                    </group>
+                    <notebook>
+                        <page string="Progression par produit">
+                            <field name="progression_par_produit" readonly="1">
+                                <list>
+                                    <field name="produit_id"/>
+                                    <field name="quantite_requise"/>
+                                    <field name="quantite_actuelle"/>
+                                    <field name="quantite_actuelle" widget="progressbar" options="{'current_value': 'quantite_actuelle', 'max_value': 'quantite_requise'}"/>
+                                </list>
+                            </field>
+                        </page>
+                    </notebook>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Vue form pour res.partner -->
+    <record id="view_partner_form_inherit_loyalty" model="ir.ui.view">
+        <field name="name">res.partner.form.inherit.loyalty</field>
+        <field name="model">res.partner</field>
+        <field name="inherit_id" ref="base.view_partner_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//sheet" position="before">
+                <button name="action_ajouter_participant" 
+                        string="Ajouter comme participant" 
+                        type="object" 
+                        class="oe_highlight"
+                        invisible="not mission_id"/>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Actions -->
+    <record id="action_mission" model="ir.actions.act_window">
+        <field name="name">Missions</field>
+        <field name="res_model">take_a_way_loyalty.mission</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- Menu Items -->
+    <menuitem id="menu_take_a_way_loyalty_root" 
+              name="Fidélité"
+              sequence="10"/>
+
+    <menuitem id="menu_mission"
+              name="Missions"
+              parent="menu_take_a_way_loyalty_root"
+              action="action_mission"
+              sequence="10"/>
+
+    <!-- Vue pour les Points Utilisateur -->
+    <record id="view_points_utilisateur_tree" model="ir.ui.view">
+        <field name="name">take_a_way_loyalty.points_utilisateur.list</field>
+        <field name="model">take_a_way_loyalty.points_utilisateur</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="utilisateur_id"/>
+                <field name="points_total"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Action pour les Points Utilisateur -->
+    <record id="action_points_utilisateur" model="ir.actions.act_window">
+        <field name="name">Points de fidélité</field>
+        <field name="res_model">take_a_way_loyalty.points_utilisateur</field>
+        <field name="view_mode">list</field>
+    </record>
+
+    <!-- Menu pour les points -->
+    <menuitem id="menu_points_utilisateur"
+              name="Points de fidélité"
+              parent="menu_take_a_way_loyalty_root"
+              action="action_points_utilisateur"
+              sequence="20"/>
+
+    <!-- Action pour Condition Mission -->
+    <record id="action_condition_mission" model="ir.actions.act_window">
+        <field name="name">Conditions de Mission</field>
+        <field name="res_model">take_a_way_loyalty.condition_mission</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- Vue list pour Condition Mission -->
+    <record id="view_condition_mission_list" model="ir.ui.view">
+        <field name="name">take_a_way_loyalty.condition_mission.list</field>
+        <field name="model">take_a_way_loyalty.condition_mission</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="mission_id"/>
+                <field name="type_condition"/>
+                <field name="produit_id"/>
+                <field name="categorieProduit_id"/>
+                <field name="quantite"/>
+                <field name="montant_minimum"/>
+                <field name="nombre_commandes"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Action pour ajouter un participant -->
+    <record id="action_ajouter_participant" model="ir.actions.act_window">
+        <field name="name">Ajouter un participant</field>
+        <field name="res_model">res.partner</field>
+        <field name="view_mode">list,form</field>
+        <field name="domain">[('customer', '=', True)]</field>
+    </record>
+  </data>
+</odoo>

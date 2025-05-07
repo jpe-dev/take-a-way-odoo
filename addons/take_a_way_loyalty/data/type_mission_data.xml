@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        <record id="type_mission_achat_produit" model="take_a_way_loyalty.type_mission">
+            <field name="code">ACHAT_PRODUIT</field>
+            <field name="libelle">Achat d'un produit spécifique</field>
+        </record>
+
+        <record id="type_mission_total_commande" model="take_a_way_loyalty.type_mission">
+            <field name="code">TOTAL_COMMANDE</field>
+            <field name="libelle">Montant total de la commande</field>
+        </record>
+
+        <record id="type_mission_nombre_commande" model="take_a_way_loyalty.type_mission">
+            <field name="code">NOMBRE_COMMANDE</field>
+            <field name="libelle">Nombre de commandes effectuées</field>
+        </record>
+
+        <record id="type_mission_parrainage" model="take_a_way_loyalty.type_mission">
+            <field name="code">PARRAINAGE</field>
+            <field name="libelle">Parrainage d'un nouveau client</field>
+        </record>
+
+        <record id="type_mission_categorie_produit" model="take_a_way_loyalty.type_mission">
+            <field name="code">CATEGORIE_PRODUIT</field>
+            <field name="libelle">Achat dans une catégorie de produits</field>
+        </record>
+    </data>
+</odoo>

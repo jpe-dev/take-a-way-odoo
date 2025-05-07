@@ -1,0 +1,40 @@
+# Fichiers backup
+backup*
+*.backup
+
+# Fichiers dump
+dump*
+*.dump
+
+# Fichiers log
+log*
+*.log
+
+# Fichiers système
+.DS_Store
+Thumbs.db
+
+# Fichiers Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Fichiers Odoo
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+parts/
+bin/
+var/
+sdist/
+develop-eggs/
+.installed.cfg
+lib/
+lib64/ 
