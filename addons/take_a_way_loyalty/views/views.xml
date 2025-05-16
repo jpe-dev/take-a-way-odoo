@@ -14,6 +14,12 @@
                 <field name="quantite"/>
                 <field name="montant_minimum"/>
                 <field name="nombre_commandes"/>
+                <!-- Champs pour mission consécutive, sans attrs (Odoo 18) -->
+                <field name="type_periode"/>
+                <field name="nombre_periodes"/>
+                <field name="type_objectif"/>
+                <field name="commandes_par_periode"/>
+                <field name="montant_par_periode"/>
             </list>
         </field>
     </record>
@@ -76,6 +82,27 @@
                                readonly="type_condition.code != 'NOMBRE_COMMANDE'"
                                required="type_condition.code == 'NOMBRE_COMMANDE'"
                                invisible="type_condition.code != 'NOMBRE_COMMANDE'"/>
+                        <!-- Champs pour la mission consécutive -->
+                        <field name="type_periode" 
+                               readonly="type_condition.code != 'CONSECUTIVE'"
+                               required="type_condition.code == 'CONSECUTIVE'"
+                               invisible="type_condition.code != 'CONSECUTIVE'"/>
+                        <field name="nombre_periodes" 
+                               readonly="type_condition.code != 'CONSECUTIVE'"
+                               required="type_condition.code == 'CONSECUTIVE'"
+                               invisible="type_condition.code != 'CONSECUTIVE'"/>
+                        <field name="type_objectif" 
+                               readonly="type_condition.code != 'CONSECUTIVE'"
+                               required="type_condition.code == 'CONSECUTIVE'"
+                               invisible="type_condition.code != 'CONSECUTIVE'"/>
+                        <field name="commandes_par_periode" 
+                               readonly="type_condition.code != 'CONSECUTIVE' or type_objectif == 'montant'"
+                               required="type_condition.code == 'CONSECUTIVE' and type_objectif == 'commandes'"
+                               invisible="type_condition.code != 'CONSECUTIVE' or type_objectif == 'montant'"/>
+                        <field name="montant_par_periode" 
+                               readonly="type_condition.code != 'CONSECUTIVE' or type_objectif == 'commandes'"
+                               required="type_condition.code == 'CONSECUTIVE' and type_objectif == 'montant'"
+                               invisible="type_condition.code != 'CONSECUTIVE' or type_objectif == 'commandes'"/>
                     </group>
                 </sheet>
             </form>
@@ -108,24 +135,17 @@
                             <field name="condition_ids">
                                 <list editable="bottom">
                                     <field name="type_condition"/>
-                                    <field name="produit_id" 
-                                           readonly="type_condition_code != 'ACHAT_PRODUIT'"
-                                           required="type_condition_code == 'ACHAT_PRODUIT'"
-                                           invisible="type_condition_code != 'ACHAT_PRODUIT'"/>
-                                    <field name="categorieProduit_id" 
-                                           readonly="type_condition_code != 'CATEGORIE_PRODUIT'"
-                                           required="type_condition_code == 'CATEGORIE_PRODUIT'"
-                                           invisible="type_condition_code != 'CATEGORIE_PRODUIT'"/>
-                                    <field name="quantite" 
-                                           invisible="type_condition_code not in ['ACHAT_PRODUIT', 'CATEGORIE_PRODUIT']"/>
-                                    <field name="montant_minimum" 
-                                           readonly="type_condition_code != 'TOTAL_COMMANDE'"
-                                           required="type_condition_code == 'TOTAL_COMMANDE'"
-                                           invisible="type_condition_code != 'TOTAL_COMMANDE'"/>
-                                    <field name="nombre_commandes" 
-                                           readonly="type_condition_code != 'NOMBRE_COMMANDE'"
-                                           required="type_condition_code == 'NOMBRE_COMMANDE'"
-                                           invisible="type_condition_code != 'NOMBRE_COMMANDE'"/>
+                                    <field name="produit_id"/>
+                                    <field name="categorieProduit_id"/>
+                                    <field name="quantite"/>
+                                    <field name="montant_minimum"/>
+                                    <field name="nombre_commandes"/>
+                                    <!-- Champs pour mission consécutive, tous éditables -->
+                                    <field name="type_periode"/>
+                                    <field name="nombre_periodes"/>
+                                    <field name="type_objectif"/>
+                                    <field name="commandes_par_periode"/>
+                                    <field name="montant_par_periode"/>
                                     <field name="type_condition_code" invisible="1"/>
                                 </list>
                             </field>
@@ -168,6 +188,16 @@
                                     <field name="quantite_requise"/>
                                     <field name="quantite_actuelle"/>
                                     <field name="quantite_actuelle" widget="progressbar" options="{'current_value': 'quantite_actuelle', 'max_value': 'quantite_requise'}"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Progression par période">
+                            <field name="progression_periode_ids" readonly="1">
+                                <list>
+                                    <field name="periode_debut"/>
+                                    <field name="periode_fin"/>
+                                    <field name="nombre_commandes"/>
+                                    <field name="montant_total"/>
                                 </list>
                             </field>
                         </page>
@@ -266,7 +296,61 @@
         <field name="name">Ajouter un participant</field>
         <field name="res_model">res.partner</field>
         <field name="view_mode">list,form</field>
-        <field name="domain">[('customer', '=', True)]</field>
+        <field name="domain">[('is_company', '=', False), ('type', '=', 'contact')]</field>
+    </record>
+
+    <!-- Vue tree pour Progression par période -->
+    <record id="view_progression_periode_tree" model="ir.ui.view">
+        <field name="name">take_a_way_loyalty.progression_periode.tree</field>
+        <field name="model">take_a_way_loyalty.progression_periode</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="mission_user_id"/>
+                <field name="periode_debut"/>
+                <field name="periode_fin"/>
+                <field name="nombre_commandes"/>
+                <field name="montant_total"/>
+            </list>
+        </field>
+    </record>
+
+    <!-- Vue form pour Progression par période -->
+    <record id="view_progression_periode_form" model="ir.ui.view">
+        <field name="name">take_a_way_loyalty.progression_periode.form</field>
+        <field name="model">take_a_way_loyalty.progression_periode</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <field name="mission_user_id"/>
+                        <field name="periode_debut"/>
+                        <field name="periode_fin"/>
+                        <field name="nombre_commandes"/>
+                        <field name="montant_total"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Action pour Progression par période -->
+    <record id="action_progression_periode" model="ir.actions.act_window">
+        <field name="name">Progression par période</field>
+        <field name="res_model">take_a_way_loyalty.progression_periode</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- Menu pour Progression par période -->
+    <menuitem id="menu_progression_periode"
+              name="Progression par période"
+              parent="menu_take_a_way_loyalty_root"
+              action="action_progression_periode"
+              sequence="30"/>
+
+    <!-- Type de mission -->
+    <record id="type_mission_achats_jour" model="take_a_way_loyalty.type_mission">
+        <field name="code">ACHATS_JOUR</field>
+        <field name="libelle">2 achats en une journée</field>
     </record>
   </data>
 </odoo>

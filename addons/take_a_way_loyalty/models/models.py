@@ -2,6 +2,7 @@
 
 from odoo import models, fields, api
 import logging
+from datetime import datetime, timedelta
 
 _logger = logging.getLogger(__name__)
 
@@ -33,13 +34,11 @@ class Mission(models.Model):
     condition_ids = fields.One2many('take_a_way_loyalty.condition_mission', 'mission_id', string='Conditions')
 
     def ajouter_participant(self):
-        """Ouvre la vue de sélection des clients pour ajouter un participant"""
+        """Ouvre le wizard d'ajout de participant à la mission"""
         return {
-            'name': 'Ajouter un participant',
             'type': 'ir.actions.act_window',
-            'res_model': 'res.partner',
-            'view_mode': 'list,form',
-            'domain': [('customer', '=', True)],
+            'res_model': 'add.participant.wizard',
+            'view_mode': 'form',
             'target': 'new',
             'context': {
                 'default_mission_id': self.id,
@@ -66,6 +65,11 @@ class MissionUser(models.Model):
         ('expire', 'Expiré'),
         ('abandonne', 'Abandonné')
     ], string='État', default='en_cours')
+    progression_periode_ids = fields.One2many(
+        'take_a_way_loyalty.progression_periode',
+        'mission_user_id',
+        string='Progression par période'
+    )
 
     _sql_constraints = [
         ('unique_mission_user', 'UNIQUE(mission_id, utilisateur_id)', 
@@ -77,15 +81,19 @@ class MissionUser(models.Model):
         for vals in vals_list:
             # Créer l'enregistrement des points si nécessaire
             if vals.get('utilisateur_id'):
-                points_record = self.env['take_a_way_loyalty.points_utilisateur'].search([
+                points_record = self.env['take_a_way_loyalty.points_utilisateur'].sudo().search([
                     ('utilisateur_id', '=', vals['utilisateur_id'])
                 ], limit=1)
                 
                 if not points_record:
-                    self.env['take_a_way_loyalty.points_utilisateur'].create({
-                        'utilisateur_id': vals['utilisateur_id'],
-                        'points_total': 0
-                    })
+                    try:
+                        points_record = self.env['take_a_way_loyalty.points_utilisateur'].sudo().create({
+                            'utilisateur_id': vals['utilisateur_id'],
+                            'points_total': 0
+                        })
+                    except Exception as e:
+                        _logger.error("Erreur lors de la création des points utilisateur: %s", str(e))
+                        # Si la création échoue, on continue quand même avec la création du participant
         
         return super(MissionUser, self).create(vals_list)
 
@@ -119,7 +127,7 @@ class MissionUser(models.Model):
                     break
             else:
                 # Pour les autres types de conditions
-                if mission_user.progression < condition.quantite:
+                if mission_user.progression < condition.nombre_commandes:
                     conditions_remplies = False
                     break
 
@@ -176,21 +184,28 @@ class MissionUser(models.Model):
         ], limit=1)
 
         if not points_record:
-            points_record = self.env['take_a_way_loyalty.points_utilisateur'].create({
-                'utilisateur_id': partner_id,
-                'points_total': 0
-            })
+            try:
+                points_record = self.env['take_a_way_loyalty.points_utilisateur'].create({
+                    'utilisateur_id': partner_id,
+                    'points_total': 0
+                })
+            except Exception as e:
+                _logger.error("Erreur lors de la création des points utilisateur: %s", str(e))
+                # Si la création échoue, on continue quand même avec la création du participant
 
         # Créer le participant
-        participant = self.env['take_a_way_loyalty.mission_user'].create({
-            'mission_id': self.id,
-            'utilisateur_id': partner_id,
-            'date_debut': fields.Date.today(),
-            'progression': 0,
-            'etat': 'en_cours'
-        })
-
-        return participant
+        try:
+            participant = self.env['take_a_way_loyalty.mission_user'].create({
+                'mission_id': self.id,
+                'utilisateur_id': partner_id,
+                'date_debut': fields.Date.today(),
+                'progression': 0,
+                'etat': 'en_cours'
+            })
+            return participant
+        except Exception as e:
+            _logger.error("Erreur lors de la création du participant: %s", str(e))
+            return False
 
 class TypeMission(models.Model):
     _name = 'take_a_way_loyalty.type_mission'
@@ -222,6 +237,24 @@ class ConditionMission(models.Model):
     montant_minimum = fields.Float(string='Montant minimum')
     nombre_commandes = fields.Integer(string='Nombre de commandes')
     delai_jours = fields.Integer(string='Délai en jours')
+
+    # Champs pour la mission consécutive
+    type_periode = fields.Selection([
+        ('quotidien', 'Quotidien'),
+        ('hebdomadaire', 'Hebdomadaire'),
+        ('mensuel', 'Mensuel')
+    ], string='Type de période')
+    
+    nombre_periodes = fields.Integer(string='Nombre de périodes consécutives')
+    
+    commandes_par_periode = fields.Integer(string='Nombre de commandes par période')
+    
+    montant_par_periode = fields.Float(string='Montant minimum par période')
+    
+    type_objectif = fields.Selection([
+        ('commandes', 'Nombre de commandes'),
+        ('montant', 'Montant total')
+    ], string='Type d\'objectif', default='commandes')
 
     @api.depends('type_condition.code')
     def _compute_type_condition_code(self):
@@ -273,6 +306,10 @@ class PosOrder(models.Model):
                         self._check_total_condition(order, condition, mission_user)
                     elif condition.type_condition.code == 'NOMBRE_COMMANDE':
                         self._check_order_count_condition(order, condition, mission_user)
+                    elif condition.type_condition.code == 'CONSECUTIVE':
+                        self._check_consecutive_condition(order, condition, mission_user)
+                    elif condition.type_condition.code == 'ACHATS_JOUR':
+                        self._check_achats_jour_condition(order, condition, mission_user)
 
     def _check_product_condition(self, order, condition, mission_user):
         if condition.produit_id:
@@ -321,15 +358,108 @@ class PosOrder(models.Model):
             self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
 
     def _check_order_count_condition(self, order, condition, mission_user):
-        # Compter le nombre de commandes pour cet utilisateur
+        # Utiliser le statut 'paid' pour les commandes POS en Odoo 18
         order_count = self.env['pos.order'].search_count([
             ('partner_id', '=', order.partner_id.id),
-            ('state', '=', 'done'),  # ou le statut approprié
+            ('state', '=', 'paid'),  # statut correct pour Odoo 18
             ('date_order', '>=', mission_user.date_debut)
         ])
+        _logger.info('Nombre de commandes trouvées pour %s : %s (objectif : %s)', order.partner_id.name, order_count, condition.quantite)
         mission_user.progression = order_count
         # Vérifier si la mission est complétée après mise à jour de la progression
         self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
+
+    def _check_consecutive_condition(self, order, condition, mission_user):
+        """Vérifie les conditions de mission consécutive."""
+        _logger.info('[FIDELITE] Appel _check_consecutive_condition : order_id=%s, client=%s', order.id, order.partner_id.name)
+        # Déterminer la période actuelle
+        date_order = fields.Date.from_string(order.date_order)
+        if condition.type_periode == 'quotidien':
+            periode_debut = date_order
+            periode_fin = date_order
+        elif condition.type_periode == 'hebdomadaire':
+            jour_semaine = date_order.weekday()
+            periode_debut = date_order - timedelta(days=jour_semaine)
+            periode_fin = periode_debut + timedelta(days=6)
+        else:  # mensuel
+            periode_debut = date_order.replace(day=1)
+            if date_order.month == 12:
+                periode_fin = date_order.replace(year=date_order.year + 1, month=1, day=1) - timedelta(days=1)
+            else:
+                periode_fin = date_order.replace(month=date_order.month + 1, day=1) - timedelta(days=1)
+        _logger.info('[FIDELITE] Période calculée : %s -> %s', periode_debut, periode_fin)
+
+        # Vérifier si une progression existe déjà pour cette période
+        progression_periode = self.env['take_a_way_loyalty.progression_periode'].search([
+            ('mission_user_id', '=', mission_user.id),
+            ('periode_debut', '=', periode_debut),
+            ('periode_fin', '=', periode_fin)
+        ], limit=1)
+
+        if not progression_periode:
+            # Créer une nouvelle progression pour cette période
+            progression_periode = self.env['take_a_way_loyalty.progression_periode'].create({
+                'mission_user_id': mission_user.id,
+                'periode_debut': periode_debut,
+                'periode_fin': periode_fin,
+                'nombre_commandes': 0,
+                'montant_total': 0.0
+            })
+
+        # Mettre à jour la progression
+        progression_periode.nombre_commandes += 1
+        progression_periode.montant_total += order.amount_total
+
+        # Vérifier si l'objectif est atteint pour cette période
+        objectif_atteint = False
+        if condition.type_objectif == 'commandes':
+            objectif_atteint = progression_periode.nombre_commandes >= condition.commandes_par_periode
+        else:
+            objectif_atteint = progression_periode.montant_total >= condition.montant_par_periode
+
+        if objectif_atteint:
+            # Vérifier les périodes précédentes
+            periodes_precedentes = self.env['take_a_way_loyalty.progression_periode'].search([
+                ('mission_user_id', '=', mission_user.id),
+                ('periode_fin', '<', periode_debut)
+            ], order='periode_fin desc', limit=condition.nombre_periodes - 1)
+
+            # Vérifier si toutes les périodes précédentes ont atteint leur objectif
+            toutes_periodes_atteintes = True
+            for periode in periodes_precedentes:
+                if condition.type_objectif == 'commandes':
+                    if periode.nombre_commandes < condition.commandes_par_periode:
+                        toutes_periodes_atteintes = False
+                        break
+                else:
+                    if periode.montant_total < condition.montant_par_periode:
+                        toutes_periodes_atteintes = False
+                        break
+
+            if toutes_periodes_atteintes and len(periodes_precedentes) == condition.nombre_periodes - 1:
+                # La mission est complétée
+                mission_user.etat = 'termine'
+                # Ajouter les points de récompense
+                points_record = self.env['take_a_way_loyalty.points_utilisateur'].search([
+                    ('utilisateur_id', '=', mission_user.utilisateur_id.id)
+                ], limit=1)
+                if points_record:
+                    points_record.points_total += mission_user.mission_id.point_recompense
+
+    def _check_achats_jour_condition(self, order, condition, mission_user):
+        """Vérifie si l'utilisateur a fait 2 achats dans la même journée."""
+        # On récupère la date de la commande (sans l'heure)
+        date_order = fields.Date.from_string(order.date_order)
+        # On compte les commandes 'paid' du jour pour ce user
+        order_count = self.env['pos.order'].search_count([
+            ('partner_id', '=', order.partner_id.id),
+            ('state', '=', 'paid'),
+            ('date_order', '>=', date_order.strftime('%Y-%m-%d') + " 00:00:00"),
+            ('date_order', '<=', date_order.strftime('%Y-%m-%d') + " 23:59:59"),
+        ])
+        if order_count >= 2:
+            mission_user.progression = order_count
+            self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
 
 class ProgressionProduit(models.Model):
     _name = 'take_a_way_loyalty.progression_produit'
@@ -355,6 +485,21 @@ class ResPartner(models.Model):
         if not self.mission_id:
             return False
         return self.mission_id.action_ajouter_participant(self.id)
+
+class ProgressionPeriode(models.Model):
+    _name = 'take_a_way_loyalty.progression_periode'
+    _description = 'Progression par période pour une mission consécutive'
+
+    mission_user_id = fields.Many2one('take_a_way_loyalty.mission_user', string='Mission Utilisateur', required=True)
+    periode_debut = fields.Date(string='Début de la période', required=True)
+    periode_fin = fields.Date(string='Fin de la période', required=True)
+    nombre_commandes = fields.Integer(string='Nombre de commandes', default=0)
+    montant_total = fields.Float(string='Montant total', default=0.0)
+
+    _sql_constraints = [
+        ('unique_periode_mission', 'UNIQUE(mission_user_id, periode_debut, periode_fin)', 
+         'Une période ne peut être suivie qu\'une seule fois par mission!')
+    ]
 
 # from odoo import models, fields, api
 

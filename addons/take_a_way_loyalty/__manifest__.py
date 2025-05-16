@@ -23,6 +23,7 @@
         'security/ir.model.access.csv',
         'data/type_mission_data.xml',
         'views/views.xml',
+        'views/add_participant_wizard_views.xml',
     ],
     # only loaded in demonstration mode
     'demo': [],
