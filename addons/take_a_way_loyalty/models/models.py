@@ -45,10 +45,64 @@ class Mission(models.Model):
             }
         }
 
-    @api.model
-    def create(self, vals):
-        mission = super(Mission, self).create(vals)
-        return mission
+    def ajouter_tous_contacts(self):
+        """Ajoute tous les contacts comme participants à la mission"""
+        # Récupérer tous les contacts (partenaires non-entreprises)
+        contacts = self.env['res.partner'].search([
+            ('is_company', '=', False),
+            ('type', '=', 'contact')
+        ])
+        
+        # Créer les enregistrements mission_user pour chaque contact
+        for contact in contacts:
+            try:
+                # Vérifier si le contact est déjà participant
+                existing = self.env['take_a_way_loyalty.mission_user'].search([
+                    ('mission_id', '=', self.id),
+                    ('utilisateur_id', '=', contact.id)
+                ], limit=1)
+                
+                if not existing:
+                    self.env['take_a_way_loyalty.mission_user'].create({
+                        'mission_id': self.id,
+                        'utilisateur_id': contact.id,
+                        'date_debut': fields.Date.today(),
+                        'progression': 0,
+                        'etat': 'en_cours'
+                    })
+            except Exception as e:
+                _logger.error("Erreur lors de l'ajout du contact %s à la mission %s: %s",
+                            contact.name, self.name, str(e))
+        
+        return True
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        """Surcharge de la méthode create pour ajouter automatiquement tous les contacts"""
+        missions = super(Mission, self).create(vals_list)
+        
+        for mission in missions:
+            # Récupérer tous les contacts (partenaires non-entreprises)
+            contacts = self.env['res.partner'].search([
+                ('is_company', '=', False),
+                ('type', '=', 'contact')
+            ])
+            
+            # Créer les enregistrements mission_user pour chaque contact
+            for contact in contacts:
+                try:
+                    self.env['take_a_way_loyalty.mission_user'].create({
+                        'mission_id': mission.id,
+                        'utilisateur_id': contact.id,
+                        'date_debut': fields.Date.today(),
+                        'progression': 0,
+                        'etat': 'en_cours'
+                    })
+                except Exception as e:
+                    _logger.error("Erreur lors de l'ajout automatique du contact %s à la mission %s: %s",
+                                contact.name, mission.name, str(e))
+        
+        return missions
 
 class MissionUser(models.Model):
     _name = 'take_a_way_loyalty.mission_user'

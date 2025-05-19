@@ -109,7 +109,7 @@
         </field>
     </record>
 
-    <!-- Vue tree pour Mission -->
+    <!-- Vue form pour Mission -->
     <record id="view_mission_form" model="ir.ui.view">
         <field name="name">take_a_way_loyalty.mission.form</field>
         <field name="model">take_a_way_loyalty.mission</field>
@@ -120,6 +120,11 @@
                             string="Ajouter un participant" 
                             type="object" 
                             class="oe_highlight"/>
+                    <button name="ajouter_tous_contacts" 
+                            string="Ajouter tous les contacts" 
+                            type="object" 
+                            class="oe_highlight"
+                            help="Ajoute automatiquement tous les contacts comme participants à cette mission"/>
                 </header>
                 <sheet>
                     <group>
