@@ -256,12 +256,24 @@ class ConditionMission(models.Model):
         ('montant', 'Montant total')
     ], string='Type d\'objectif', default='commandes')
 
+    categories_ids = fields.Many2many('product.category', string='Catégories de produits')
+
     @api.depends('type_condition.code')
     def _compute_type_condition_code(self):
         for record in self:
             record.type_condition_code = record.type_condition.code if record.type_condition else False
 
     type_condition_code = fields.Char(compute='_compute_type_condition_code', store=True)
+
+    @api.onchange('type_condition')
+    def _onchange_type_condition(self):
+        if self.type_condition and self.type_condition.code == 'ACHAT_TOUTES_CATEGORIES':
+            categories = self.env['product.category'].search([
+                ('product_ids.sale_ok', '=', True)
+            ])
+            self.categories_ids = [(6, 0, categories.ids)]
+        else:
+            self.categories_ids = [(5, 0, 0)]
 
 class PosOrder(models.Model):
     _inherit = 'pos.order'
@@ -310,6 +322,8 @@ class PosOrder(models.Model):
                         self._check_consecutive_condition(order, condition, mission_user)
                     elif condition.type_condition.code == 'ACHATS_JOUR':
                         self._check_achats_jour_condition(order, condition, mission_user)
+                    elif condition.type_condition.code == 'ACHAT_TOUTES_CATEGORIES':
+                        self._check_achat_toutes_categories_condition(order, condition, mission_user)
 
     def _check_product_condition(self, order, condition, mission_user):
         if condition.produit_id:
@@ -459,6 +473,22 @@ class PosOrder(models.Model):
         ])
         if order_count >= 2:
             mission_user.progression = order_count
+            self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
+
+    def _check_achat_toutes_categories_condition(self, order, condition, mission_user):
+        categories = condition.categories_ids
+        toutes_achetees = True
+        for cat in categories:
+            lignes = self.env['pos.order.line'].search([
+                ('order_id.partner_id', '=', order.partner_id.id),
+                ('order_id.state', '=', 'paid'),
+                ('product_id.categ_id', '=', cat.id),
+            ], limit=1)
+            if not lignes:
+                toutes_achetees = False
+                break
+        if toutes_achetees and categories:
+            mission_user.progression = len(categories)
             self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
 
 class ProgressionProduit(models.Model):

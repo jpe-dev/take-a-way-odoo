@@ -103,6 +103,10 @@
                                readonly="type_condition.code != 'CONSECUTIVE' or type_objectif == 'commandes'"
                                required="type_condition.code == 'CONSECUTIVE' and type_objectif == 'montant'"
                                invisible="type_condition.code != 'CONSECUTIVE' or type_objectif == 'commandes'"/>
+                        <field name="categories_ids"
+                               invisible="type_condition.code != 'ACHAT_TOUTES_CATEGORIES'"
+                               readonly="1"
+                               widget="many2many_tags"/>
                     </group>
                 </sheet>
             </form>
@@ -351,6 +355,11 @@
     <record id="type_mission_achats_jour" model="take_a_way_loyalty.type_mission">
         <field name="code">ACHATS_JOUR</field>
         <field name="libelle">2 achats en une journée</field>
+    </record>
+
+    <record id="type_mission_achat_toutes_categories" model="take_a_way_loyalty.type_mission">
+        <field name="code">ACHAT_TOUTES_CATEGORIES</field>
+        <field name="libelle">Achat dans chaque catégorie de produits</field>
     </record>
   </data>
 </odoo>
