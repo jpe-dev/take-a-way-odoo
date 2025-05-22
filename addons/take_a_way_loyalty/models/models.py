@@ -111,6 +111,7 @@ class MissionUser(models.Model):
     mission_id = fields.Many2one('take_a_way_loyalty.mission', string='Mission', required=True)
     utilisateur_id = fields.Many2one('res.partner', string='Utilisateur', required=True)
     date_debut = fields.Date(string='Date de début', default=fields.Date.today)
+    date_heure_debut = fields.Datetime(string='Date et heure de début', default=fields.Datetime.now)
     progression = fields.Integer(string='Progression', default=0)
     progression_par_produit = fields.One2many('take_a_way_loyalty.progression_produit', 'mission_user_id', string='Progression par produit')
     etat = fields.Selection([
@@ -147,7 +148,6 @@ class MissionUser(models.Model):
                         })
                     except Exception as e:
                         _logger.error("Erreur lors de la création des points utilisateur: %s", str(e))
-                        # Si la création échoue, on continue quand même avec la création du participant
         
         return super(MissionUser, self).create(vals_list)
 
@@ -174,23 +174,17 @@ class MissionUser(models.Model):
 
                 if not progression_produit or progression_produit.quantite_actuelle < progression_produit.quantite_requise:
                     conditions_remplies = False
-                    _logger.info("Condition non remplie pour le produit %s: %s/%s",
-                               condition.produit_id.name,
-                               progression_produit.quantite_actuelle if progression_produit else 0,
-                               condition.quantite)
                     break
+            elif condition.type_condition.code == 'ACHAT_TOUTES_CATEGORIES':
+                # Pour ce type de mission, la progression est déjà gérée dans _check_achat_toutes_categories_condition
+                continue
             else:
                 # Pour les autres types de conditions
                 if mission_user.progression < condition.nombre_commandes:
                     conditions_remplies = False
                     break
 
-        _logger.info("Vérification de la mission: %s, conditions remplies: %s", 
-                   mission_user.mission_id.name, conditions_remplies)
-
-        # Si toutes les conditions sont remplies et que la mission est en cours
         if conditions_remplies and mission_user.etat == 'en_cours':
-            _logger.info("Mission complétée! Mise à jour de l'état à 'termine'")
             mission_user.etat = 'termine'
             
             # Chercher ou créer l'enregistrement des points de l'utilisateur
@@ -206,8 +200,6 @@ class MissionUser(models.Model):
             
             # Ajouter les points de récompense
             points_record.points_total += mission_user.mission_id.point_recompense
-            _logger.info("Points ajoutés: %s. Nouveau total: %s", 
-                       mission_user.mission_id.point_recompense, points_record.points_total)
 
     @api.model
     def create(self, vals):
@@ -322,10 +314,19 @@ class ConditionMission(models.Model):
     @api.onchange('type_condition')
     def _onchange_type_condition(self):
         if self.type_condition and self.type_condition.code == 'ACHAT_TOUTES_CATEGORIES':
-            categories = self.env['product.category'].search([
-                ('product_ids.sale_ok', '=', True)
+            # Rechercher toutes les catégories qui ont des produits vendables dans le PoS
+            pos_products = self.env['product.product'].search([
+                ('available_in_pos', '=', True),
+                ('sale_ok', '=', True),
+                ('type', '=', 'product')
             ])
-            self.categories_ids = [(6, 0, categories.ids)]
+            
+            # Récupérer les catégories uniques de ces produits
+            categories = pos_products.mapped('categ_id')
+            if categories:
+                self.categories_ids = [(6, 0, categories.ids)]
+            else:
+                _logger.warning('Aucune catégorie trouvée avec des produits PoS')
         else:
             self.categories_ids = [(5, 0, 0)]
 
@@ -342,18 +343,12 @@ class PosOrder(models.Model):
 
     def _check_missions(self):
         for order in self:
-            # Ajoutons des logs pour debug
-            _logger.info('Checking missions for order: %s', order.name)
-            _logger.info('Customer: %s', order.partner_id.name)
-            
             missions = self.env['take_a_way_loyalty.mission'].search([
                 ('debut', '<=', fields.Date.today()),
                 ('fin', '>=', fields.Date.today()),
             ])
 
             for mission in missions:
-                _logger.info('Checking mission: %s', mission.name)
-                
                 mission_user = self.env['take_a_way_loyalty.mission_user'].search([
                     ('mission_id', '=', mission.id),
                     ('utilisateur_id', '=', order.partner_id.id),
@@ -361,11 +356,9 @@ class PosOrder(models.Model):
                 ], limit=1)
 
                 if not mission_user:
-                    _logger.info('No active participation found for this user in this mission')
                     continue
 
                 for condition in mission.condition_ids:
-                    _logger.info('Checking condition type: %s', condition.type_condition.code)
                     if condition.type_condition.code == 'ACHAT_PRODUIT':
                         self._check_product_condition(order, condition, mission_user)
                     elif condition.type_condition.code == 'TOTAL_COMMANDE':
@@ -381,17 +374,12 @@ class PosOrder(models.Model):
 
     def _check_product_condition(self, order, condition, mission_user):
         if condition.produit_id:
-            _logger.info('Checking product condition for product: %s', condition.produit_id.name)
-            
-            # Vérifier si une progression existe déjà pour ce produit
             progression_produit = self.env['take_a_way_loyalty.progression_produit'].search([
                 ('mission_user_id', '=', mission_user.id),
                 ('produit_id', '=', condition.produit_id.id)
             ], limit=1)
 
             if not progression_produit:
-                _logger.info('Creating new progression record for product: %s', condition.produit_id.name)
-                # Créer une nouvelle progression pour ce produit
                 progression_produit = self.env['take_a_way_loyalty.progression_produit'].create({
                     'mission_user_id': mission_user.id,
                     'produit_id': condition.produit_id.id,
@@ -399,30 +387,18 @@ class PosOrder(models.Model):
                     'quantite_actuelle': 0
                 })
 
-            # Calculer la quantité totale achetée dans cette commande
             quantite_achetee = sum(line.qty for line in order.lines if line.product_id.id == condition.produit_id.id)
             
             if quantite_achetee > 0:
-                _logger.info('Product match found! Quantity purchased: %s, Required: %s', 
-                           quantite_achetee, condition.quantite)
-                
-                # Mettre à jour la quantité actuelle
                 progression_produit.write({
                     'quantite_actuelle': progression_produit.quantite_actuelle + quantite_achetee
                 })
                 
-                _logger.info('Progression updated for product %s: %s/%s', 
-                           condition.produit_id.name, 
-                           progression_produit.quantite_actuelle,
-                           progression_produit.quantite_requise)
-                
-                # Vérifier si la mission est complétée
                 self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
 
     def _check_total_condition(self, order, condition, mission_user):
         if order.amount_total >= condition.montant_minimum:
             mission_user.progression += 1
-            # Vérifier si la mission est complétée après mise à jour de la progression
             self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
 
     def _check_order_count_condition(self, order, condition, mission_user):
@@ -432,15 +408,11 @@ class PosOrder(models.Model):
             ('state', '=', 'paid'),  # statut correct pour Odoo 18
             ('date_order', '>=', mission_user.date_debut)
         ])
-        _logger.info('Nombre de commandes trouvées pour %s : %s (objectif : %s)', order.partner_id.name, order_count, condition.quantite)
         mission_user.progression = order_count
-        # Vérifier si la mission est complétée après mise à jour de la progression
         self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
 
     def _check_consecutive_condition(self, order, condition, mission_user):
         """Vérifie les conditions de mission consécutive."""
-        _logger.info('[FIDELITE] Appel _check_consecutive_condition : order_id=%s, client=%s', order.id, order.partner_id.name)
-        # Déterminer la période actuelle
         date_order = fields.Date.from_string(order.date_order)
         if condition.type_periode == 'quotidien':
             periode_debut = date_order
@@ -455,7 +427,6 @@ class PosOrder(models.Model):
                 periode_fin = date_order.replace(year=date_order.year + 1, month=1, day=1) - timedelta(days=1)
             else:
                 periode_fin = date_order.replace(month=date_order.month + 1, day=1) - timedelta(days=1)
-        _logger.info('[FIDELITE] Période calculée : %s -> %s', periode_debut, periode_fin)
 
         # Vérifier si une progression existe déjà pour cette période
         progression_periode = self.env['take_a_way_loyalty.progression_periode'].search([
@@ -530,20 +501,46 @@ class PosOrder(models.Model):
             self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
 
     def _check_achat_toutes_categories_condition(self, order, condition, mission_user):
+        if not condition.categories_ids:
+            pos_products = self.env['product.product'].search([
+                '|',
+                ('available_in_pos', '=', True),
+                ('type', 'in', ['product', 'consu']),
+                ('sale_ok', '=', True)
+            ])
+            
+            categories = pos_products.mapped('categ_id').filtered(
+                lambda c: c.name.lower() not in ['all', 'pos']
+            )
+            
+            if categories:
+                condition.write({'categories_ids': [(6, 0, categories.ids)]})
+            else:
+                return
+
         categories = condition.categories_ids
-        toutes_achetees = True
-        for cat in categories:
-            lignes = self.env['pos.order.line'].search([
-                ('order_id.partner_id', '=', order.partner_id.id),
-                ('order_id.state', '=', 'paid'),
-                ('product_id.categ_id', '=', cat.id),
+        categories_achetees = set()
+        
+        commandes = self.env['pos.order'].search([
+            ('partner_id', '=', order.partner_id.id),
+            ('state', '=', 'paid'),
+            ('date_order', '>=', mission_user.date_heure_debut)
+        ])
+        
+        for commande in commandes:
+            for ligne in commande.lines:
+                if ligne.product_id.categ_id in categories:
+                    categories_achetees.add(ligne.product_id.categ_id.id)
+        
+        mission_user.progression = len(categories_achetees)
+        
+        if len(categories_achetees) == len(categories):
+            mission_user.etat = 'termine'
+            points_record = self.env['take_a_way_loyalty.points_utilisateur'].search([
+                ('utilisateur_id', '=', mission_user.utilisateur_id.id)
             ], limit=1)
-            if not lignes:
-                toutes_achetees = False
-                break
-        if toutes_achetees and categories:
-            mission_user.progression = len(categories)
-            self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
+            if points_record:
+                points_record.points_total += mission_user.mission_id.point_recompense
 
 class ProgressionProduit(models.Model):
     _name = 'take_a_way_loyalty.progression_produit'
