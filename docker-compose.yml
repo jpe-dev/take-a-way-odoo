@@ -1,0 +1,47 @@
+services:
+  web:
+    image: odoo:18.0
+    depends_on:
+      - db
+    ports:
+      - "8069:8069"
+    environment:
+      - HOST=db
+      - USER=odoo
+      - PASSWORD=4wc2-7uej-au4y
+      - DATABASE_NAME=db-odoo-ta
+      - ADMIN_PASSWORD=admin
+    volumes:
+      - odoo-web-data:/var/lib/odoo
+      - ./odoo.conf:/etc/odoo/odoo.conf
+      - ./addons:/mnt/extra-addons
+    command: >- 
+      -- --db_host=db 
+      --db_port=5432 
+      --db_user=odoo 
+      --db_password=4wc2-7uej-au4y 
+      --init base,stock,point_of_sale,purchase,mrp,sale_management,account,crm,base_accounting_kit,take_a_way_loyalty
+      --without-demo=all 
+      --load-language fr_CH 
+      -d db-odoo-ta
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "{{.Name}}"
+        labels: "production_status"
+        env: "os,customer"
+
+  db:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=db-odoo-ta
+      - POSTGRES_USER=odoo
+      - POSTGRES_PASSWORD=4wc2-7uej-au4y
+    volumes:
+      - odoo-db-data:/var/lib/postgresql/data
+
+volumes:
+  odoo-web-data:
+  odoo-db-data:
