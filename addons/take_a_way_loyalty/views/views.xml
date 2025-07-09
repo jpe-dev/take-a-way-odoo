@@ -68,7 +68,9 @@
                                readonly="type_condition.code != 'ACHAT_PRODUIT'"
                                required="type_condition.code == 'ACHAT_PRODUIT'"
                                invisible="type_condition.code != 'ACHAT_PRODUIT'"/>
-                        <field name="categorieProduit_id" 
+                        <field name="categories_ids"
+                               domain="[('id', 'in', parent.mission_id.pos_config_id.iface_available_categ_ids)]"
+                               widget="many2many_tags"
                                readonly="type_condition.code != 'CATEGORIE_PRODUIT'"
                                required="type_condition.code == 'CATEGORIE_PRODUIT'"
                                invisible="type_condition.code != 'CATEGORIE_PRODUIT'"/>
@@ -104,9 +106,15 @@
                                required="type_condition.code == 'CONSECUTIVE' and type_objectif == 'montant'"
                                invisible="type_condition.code != 'CONSECUTIVE' or type_objectif == 'commandes'"/>
                         <field name="categories_ids"
-                               invisible="type_condition.code != 'ACHAT_TOUTES_CATEGORIES'"
-                               readonly="1"
+                               domain="[('id', 'in', parent.mission_id.pos_config_id.iface_available_categ_ids)]"
+                               options="{'no_create': True, 'no_open': True, 'model': 'pos.category'}"
                                widget="many2many_tags"/>
+                        <button name="action_reinitialiser_categories" 
+                                string="Réinitialiser les catégories" 
+                                type="object" 
+                                class="btn-secondary"
+                                invisible="type_condition.code != 'ACHAT_TOUTES_CATEGORIES'"
+                                help="Réinitialise les catégories pour permettre une nouvelle sélection automatique"/>
                     </group>
                 </sheet>
             </form>
@@ -129,6 +137,11 @@
                             type="object" 
                             class="oe_highlight"
                             help="Ajoute automatiquement tous les contacts comme participants à cette mission"/>
+                    <button name="test_missions_manual" 
+                            string="Tester les missions" 
+                            type="object" 
+                            class="btn-secondary"
+                            help="Teste manuellement les missions pour déboguer"/>
                 </header>
                 <sheet>
                     <group>
@@ -138,6 +151,7 @@
                         <field name="debut"/>
                         <field name="fin"/>
                         <field name="cumulable"/>
+                        <field name="pos_config_id"/>
                     </group>
                     <notebook>
                         <page string="Conditions">
@@ -145,7 +159,7 @@
                                 <list editable="bottom">
                                     <field name="type_condition"/>
                                     <field name="produit_id"/>
-                                    <field name="categorieProduit_id"/>
+                                    <field name="categories_ids" widget="many2many_tags"/>
                                     <field name="quantite"/>
                                     <field name="montant_minimum"/>
                                     <field name="nombre_commandes"/>
@@ -296,6 +310,8 @@
                 <field name="quantite"/>
                 <field name="montant_minimum"/>
                 <field name="nombre_commandes"/>
+                <field name="montant_par_periode"/>
+                <field name="categories_ids" widget="many2many_tags" options="{'model': 'pos.category'}"/>
             </list>
         </field>
     </record>
@@ -360,11 +376,6 @@
     <record id="type_mission_achats_jour" model="take_a_way_loyalty.type_mission">
         <field name="code">ACHATS_JOUR</field>
         <field name="libelle">2 achats en une journée</field>
-    </record>
-
-    <record id="type_mission_achat_toutes_categories" model="take_a_way_loyalty.type_mission">
-        <field name="code">ACHAT_TOUTES_CATEGORIES</field>
-        <field name="libelle">Achat dans chaque catégorie de produits</field>
     </record>
   </data>
 </odoo>

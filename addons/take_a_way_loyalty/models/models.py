@@ -6,6 +6,9 @@ from datetime import datetime, timedelta
 
 _logger = logging.getLogger(__name__)
 
+# Log au chargement du module
+_logger.warning("[FIDELITE][DEBUG] Module take_a_way_loyalty chargé avec succès")
+
 class PointsUtilisateur(models.Model):
     _name = 'take_a_way_loyalty.points_utilisateur'
     _description = 'Points de fidélité des utilisateurs'
@@ -28,10 +31,20 @@ class Mission(models.Model):
     debut = fields.Date(string='Date de début')
     fin = fields.Date(string='Date de fin')
     cumulable = fields.Boolean(string='Cumulable', default=False)
+    pos_config_id = fields.Many2one('pos.config', string='Point de Vente')
 
     # Relations
     mission_user_ids = fields.One2many('take_a_way_loyalty.mission_user', 'mission_id', string='Participants')
     condition_ids = fields.One2many('take_a_way_loyalty.condition_mission', 'mission_id', string='Conditions')
+
+    @api.onchange('pos_config_id')
+    def _onchange_pos_config_id(self):
+        for mission in self:
+            categories = mission.pos_config_id.iface_available_categ_ids
+            _logger.info("Catégories PdV pour %s : %s", mission.pos_config_id.name, categories.mapped('name'))
+            for condition in mission.condition_ids:
+                if condition.type_condition and condition.type_condition.code == 'ACHAT_TOUTES_CATEGORIES':
+                    condition.categories_ids = [(6, 0, categories.ids)]
 
     def ajouter_participant(self):
         """Ouvre le wizard d'ajout de participant à la mission"""
@@ -76,19 +89,41 @@ class Mission(models.Model):
         
         return True
 
+    def test_missions_manual(self):
+        """Test manuel des missions pour déboguer"""
+        _logger.warning("[FIDELITE][DEBUG] Test manuel des missions appelé")
+        
+        # Vérifier toutes les commandes POS récentes
+        recent_orders = self.env['pos.order'].search([
+            ('state', 'in', ['paid', 'done', 'invoiced']),
+            ('create_date', '>=', fields.Date.today())
+        ], limit=10)
+        
+        _logger.warning("[FIDELITE][DEBUG] Commandes POS récentes trouvées: %s", len(recent_orders))
+        
+        for order in recent_orders:
+            _logger.warning("[FIDELITE][DEBUG] Commande: %s - Partenaire: %s - Statut: %s", 
+                           order.id, order.partner_id.name if order.partner_id else "Aucun", order.state)
+            order._check_missions()
+        
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Test des missions',
+                'message': f'Test terminé. Vérifiez les logs pour plus de détails.',
+                'type': 'info',
+            }
+        }
+
     @api.model_create_multi
     def create(self, vals_list):
-        """Surcharge de la méthode create pour ajouter automatiquement tous les contacts"""
         missions = super(Mission, self).create(vals_list)
-        
         for mission in missions:
-            # Récupérer tous les contacts (partenaires non-entreprises)
             contacts = self.env['res.partner'].search([
                 ('is_company', '=', False),
                 ('type', '=', 'contact')
             ])
-            
-            # Créer les enregistrements mission_user pour chaque contact
             for contact in contacts:
                 try:
                     self.env['take_a_way_loyalty.mission_user'].create({
@@ -101,7 +136,13 @@ class Mission(models.Model):
                 except Exception as e:
                     _logger.error("Erreur lors de l'ajout automatique du contact %s à la mission %s: %s",
                                 contact.name, mission.name, str(e))
-        
+            # Ajout auto des catégories PdV pour la condition ACHAT_TOUTES_CATEGORIES
+            if mission.pos_config_id:
+                categories = mission.pos_config_id.iface_available_categ_ids
+                for condition in mission.condition_ids:
+                    if condition.type_condition and condition.type_condition.code == 'ACHAT_TOUTES_CATEGORIES':
+                        if categories:
+                            condition.categories_ids = [(6, 0, categories.ids)]
         return missions
 
 class MissionUser(models.Model):
@@ -157,48 +198,61 @@ class MissionUser(models.Model):
             self._check_mission_completion(record)
 
     def _check_mission_completion(self, mission_user):
-        """Vérifie si la mission est complétée et met à jour l'état et les points."""
+        _logger.warning("[FIDELITE][DEBUG] _check_mission_completion appelée pour mission_user %s", mission_user.id)
         if not mission_user.mission_id.condition_ids:
             _logger.warning("La mission %s n'a pas de conditions", mission_user.mission_id.name)
             return
 
-        # Vérifier si toutes les conditions sont remplies
         conditions_remplies = True
         for condition in mission_user.mission_id.condition_ids:
             if condition.type_condition.code == 'ACHAT_PRODUIT':
-                # Vérifier la progression pour ce produit
                 progression_produit = self.env['take_a_way_loyalty.progression_produit'].search([
                     ('mission_user_id', '=', mission_user.id),
                     ('produit_id', '=', condition.produit_id.id)
                 ], limit=1)
-
                 if not progression_produit or progression_produit.quantite_actuelle < progression_produit.quantite_requise:
                     conditions_remplies = False
                     break
+            elif condition.type_condition.code == 'CATEGORIE_PRODUIT':
+                # Pour CATEGORIE_PRODUIT, on vérifie si la progression (quantité achetée) 
+                # dans la catégorie spécifiée atteint la quantité requise
+                if mission_user.progression < condition.quantite:
+                    conditions_remplies = False
+                    break
             elif condition.type_condition.code == 'ACHAT_TOUTES_CATEGORIES':
-                # Pour ce type de mission, la progression est déjà gérée dans _check_achat_toutes_categories_condition
-                continue
+                categories = condition.categories_ids
+                categories_achetees = set()
+                commandes = self.env['pos.order'].search([
+                    ('partner_id', '=', mission_user.utilisateur_id.id),
+                    ('state', '=', 'paid'),
+                    ('date_order', '>=', mission_user.date_heure_debut)
+                ])
+                _logger.info("[FIDELITE] ACHAT_TOUTES_CATEGORIES - Catégories attendues: %s", categories.mapped('name'))
+                for commande in commandes:
+                    for ligne in commande.lines:
+                        if ligne.product_id.product_tmpl_id and ligne.product_id.product_tmpl_id.pos_categ_id and ligne.product_id.product_tmpl_id.pos_categ_id.id in categories.ids:
+                            categories_achetees.add(ligne.product_id.product_tmpl_id.pos_categ_id.id)
+                _logger.info("[FIDELITE] ACHAT_TOUTES_CATEGORIES - Catégories achetées: %s", list(categories_achetees))
+                mission_user.progression = len(categories_achetees)
+                _logger.info("[FIDELITE] ACHAT_TOUTES_CATEGORIES - Progression calculée: %s/%s", len(categories_achetees), len(categories))
+                if len(categories_achetees) < len(categories):
+                    conditions_remplies = False
+                    break
             else:
-                # Pour les autres types de conditions
                 if mission_user.progression < condition.nombre_commandes:
                     conditions_remplies = False
                     break
 
         if conditions_remplies and mission_user.etat == 'en_cours':
             mission_user.etat = 'termine'
-            
-            # Chercher ou créer l'enregistrement des points de l'utilisateur
             points_record = self.env['take_a_way_loyalty.points_utilisateur'].search([
                 ('utilisateur_id', '=', mission_user.utilisateur_id.id)
             ], limit=1)
-            
             if not points_record:
                 points_record = self.env['take_a_way_loyalty.points_utilisateur'].create({
                     'utilisateur_id': mission_user.utilisateur_id.id,
                     'points_total': 0
                 })
-            
-            # Ajouter les points de récompense
             points_record.points_total += mission_user.mission_id.point_recompense
 
     @api.model
@@ -278,7 +332,7 @@ class ConditionMission(models.Model):
     mission_id = fields.Many2one('take_a_way_loyalty.mission', string='Mission', required=True)
     type_condition = fields.Many2one('take_a_way_loyalty.type_mission', string='Type de condition', required=True)
     produit_id = fields.Many2one('product.product', string='Produit')
-    categorieProduit_id = fields.Many2one('product.category', string='Catégorie de produit')
+    categorieProduit_id = fields.Many2one('pos.category', string='Catégorie PoS')
     quantite = fields.Integer(string='Quantité')
     montant_minimum = fields.Float(string='Montant minimum')
     nombre_commandes = fields.Integer(string='Nombre de commandes')
@@ -302,7 +356,7 @@ class ConditionMission(models.Model):
         ('montant', 'Montant total')
     ], string='Type d\'objectif', default='commandes')
 
-    categories_ids = fields.Many2many('product.category', string='Catégories de produits')
+    categories_ids = fields.Many2many('pos.category', string='Catégories PoS')
 
     @api.depends('type_condition.code')
     def _compute_type_condition_code(self):
@@ -311,44 +365,133 @@ class ConditionMission(models.Model):
 
     type_condition_code = fields.Char(compute='_compute_type_condition_code', store=True)
 
-    @api.onchange('type_condition')
+    @api.onchange('type_condition', 'mission_id')
     def _onchange_type_condition(self):
-        if self.type_condition and self.type_condition.code == 'ACHAT_TOUTES_CATEGORIES':
-            # Rechercher toutes les catégories qui ont des produits vendables dans le PoS
-            pos_products = self.env['product.product'].search([
-                ('available_in_pos', '=', True),
-                ('sale_ok', '=', True),
-                ('type', '=', 'product')
-            ])
-            
-            # Récupérer les catégories uniques de ces produits
-            categories = pos_products.mapped('categ_id')
-            if categories:
-                self.categories_ids = [(6, 0, categories.ids)]
-            else:
-                _logger.warning('Aucune catégorie trouvée avec des produits PoS')
-        else:
-            self.categories_ids = [(5, 0, 0)]
+        for record in self:
+            if record.type_condition:
+                if record.type_condition.code == 'CATEGORIE_PRODUIT':
+                    # Pour CATEGORIE_PRODUIT, on peut laisser l'utilisateur choisir les catégories
+                    # ou pré-remplir avec les catégories du POS
+                    if record.mission_id.pos_config_id:
+                        categories = record.mission_id.pos_config_id.iface_available_categ_ids
+                        record.categories_ids = [(6, 0, categories.ids)]
+                elif record.type_condition.code != 'ACHAT_PRODUIT':
+                    record.produit_id = False
+                elif record.type_condition.code != 'TOTAL_COMMANDE':
+                    record.montant_minimum = 0.0
+                elif record.type_condition.code != 'NOMBRE_COMMANDE':
+                    record.nombre_commandes = 0
+
+    def action_reinitialiser_categories(self):
+        self.ensure_one()
+        if self.type_condition.code == 'ACHAT_TOUTES_CATEGORIES':
+            categories = self.mission_id.pos_config_id.iface_available_categ_ids
+            self.categories_ids = [(6, 0, categories.ids)]
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Catégories réinitialisées',
+                    'message': 'Les catégories PdV ont été réinitialisées.',
+                    'type': 'info',
+                }
+            }
+        return False
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        records = super().create(vals_list)
+        for record in records:
+            if record.type_condition and record.mission_id.pos_config_id:
+                categories = record.mission_id.pos_config_id.iface_available_categ_ids
+                if (
+                    record.type_condition.code == 'ACHAT_TOUTES_CATEGORIES'
+                    and not record.categories_ids
+                ):
+                    record.categories_ids = [(6, 0, categories.ids)]
+                elif (
+                    record.type_condition.code == 'CATEGORIE_PRODUIT'
+                    and not record.categories_ids
+                ):
+                    record.categories_ids = [(6, 0, categories.ids)]
+        return records
 
 class PosOrder(models.Model):
     _inherit = 'pos.order'
 
+    def _check_missions_manual(self):
+        """Méthode manuelle pour déclencher la vérification des missions"""
+        for order in self:
+            _logger.warning("[FIDELITE][DEBUG] _check_missions_manual appelée pour la commande %s", order.id)
+        self._check_missions()
+
     def write(self, vals):
         result = super(PosOrder, self).write(vals)
         
-        # Dans POS, une commande payée a le statut 'paid'
-        if vals.get('state') == 'paid':  # Changé de 'done' à 'paid'
+        # Vérifier différents statuts possibles pour les commandes POS payées
+        if vals.get('state') in ['paid', 'done', 'invoiced']:
+            for order in self:
+                _logger.warning("[FIDELITE][DEBUG] Commande POS %s passée au statut '%s', appel de _check_missions", order.id, vals.get('state'))
+            _logger.warning("[FIDELITE][DEBUG] Valeurs de write: %s", vals)
             self._check_missions()
+        else:
+            for order in self:
+                _logger.warning("[FIDELITE][DEBUG] Commande POS %s - statut: %s (pas un statut de paiement)", order.id, vals.get('state'))
         return result
+
+    def action_pos_order_paid(self):
+        """Méthode appelée quand une commande POS est payée"""
+        for order in self:
+            _logger.warning("[FIDELITE][DEBUG] action_pos_order_paid appelée pour la commande %s", order.id)
+        result = super(PosOrder, self).action_pos_order_paid()
+        self._check_missions()
+        return result
+
+    def action_pos_order_invoice(self):
+        """Méthode appelée quand une facture est créée pour une commande POS"""
+        for order in self:
+            _logger.warning("[FIDELITE][DEBUG] action_pos_order_invoice appelée pour la commande %s", order.id)
+        result = super(PosOrder, self).action_pos_order_invoice()
+        self._check_missions()
+        return result
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        """Surcharge de la méthode create pour vérifier les commandes POS créées"""
+        orders = super(PosOrder, self).create(vals_list)
+        for order in orders:
+            _logger.warning("[FIDELITE][DEBUG] Commande POS créée: %s avec statut: %s", order.id, order.state)
+            if order.state in ['paid', 'done', 'invoiced']:
+                _logger.warning("[FIDELITE][DEBUG] Commande POS %s créée avec statut de paiement, appel de _check_missions", order.id)
+                order._check_missions()
+        return orders
 
     def _check_missions(self):
         for order in self:
+            _logger.warning("[FIDELITE][DEBUG] _check_missions appelée pour order %s", order.id)
+            _logger.warning("[FIDELITE][DEBUG] Partner de la commande: %s (ID: %s)", order.partner_id.name, order.partner_id.id)
+            
+            # Vérifier toutes les missions existantes
+            all_missions = self.env['take_a_way_loyalty.mission'].search([])
+            _logger.warning("[FIDELITE][DEBUG] Toutes les missions existantes: %s", len(all_missions))
+            for mission in all_missions:
+                _logger.warning("[FIDELITE][DEBUG] Mission: %s (début: %s, fin: %s)", mission.name, mission.debut, mission.fin)
+            
             missions = self.env['take_a_way_loyalty.mission'].search([
                 ('debut', '<=', fields.Date.today()),
                 ('fin', '>=', fields.Date.today()),
             ])
+            
+            _logger.warning("[FIDELITE][DEBUG] Missions trouvées dans la période: %s", len(missions))
 
             for mission in missions:
+                _logger.warning("[FIDELITE][DEBUG] Vérification de la mission: %s", mission.name)
+                
+                # Vérifier si la commande a un partenaire
+                if not order.partner_id:
+                    _logger.warning("[FIDELITE][DEBUG] Commande %s n'a pas de partenaire, impossible de vérifier les missions", order.id)
+                    continue
+                
                 mission_user = self.env['take_a_way_loyalty.mission_user'].search([
                     ('mission_id', '=', mission.id),
                     ('utilisateur_id', '=', order.partner_id.id),
@@ -356,9 +499,24 @@ class PosOrder(models.Model):
                 ], limit=1)
 
                 if not mission_user:
+                    _logger.warning("[FIDELITE][DEBUG] Aucun mission_user trouvé pour la mission %s et l'utilisateur %s (ID: %s)", 
+                                   mission.name, order.partner_id.name, order.partner_id.id)
+                    
+                    # Vérifier tous les mission_users pour cette mission
+                    all_mission_users = self.env['take_a_way_loyalty.mission_user'].search([
+                        ('mission_id', '=', mission.id)
+                    ])
+                    _logger.warning("[FIDELITE][DEBUG] Tous les mission_users pour cette mission: %s", len(all_mission_users))
+                    for mu in all_mission_users:
+                        _logger.warning("[FIDELITE][DEBUG] Mission_user: %s (utilisateur: %s, état: %s)", 
+                                       mu.id, mu.utilisateur_id.name, mu.etat)
                     continue
 
+                _logger.warning("[FIDELITE][DEBUG] Mission_user trouvé: %s, progression actuelle: %s", 
+                               mission_user.id, mission_user.progression)
+
                 for condition in mission.condition_ids:
+                    _logger.warning("[FIDELITE][DEBUG] Vérification de la condition: %s", condition.type_condition.code)
                     if condition.type_condition.code == 'ACHAT_PRODUIT':
                         self._check_product_condition(order, condition, mission_user)
                     elif condition.type_condition.code == 'TOTAL_COMMANDE':
@@ -369,8 +527,8 @@ class PosOrder(models.Model):
                         self._check_consecutive_condition(order, condition, mission_user)
                     elif condition.type_condition.code == 'ACHATS_JOUR':
                         self._check_achats_jour_condition(order, condition, mission_user)
-                    elif condition.type_condition.code == 'ACHAT_TOUTES_CATEGORIES':
-                        self._check_achat_toutes_categories_condition(order, condition, mission_user)
+                    elif condition.type_condition.code == 'CATEGORIE_PRODUIT':
+                        self._check_categorie_produit_condition(order, condition, mission_user)
 
     def _check_product_condition(self, order, condition, mission_user):
         if condition.produit_id:
@@ -458,10 +616,14 @@ class PosOrder(models.Model):
 
         if objectif_atteint:
             # Vérifier les périodes précédentes
-            periodes_precedentes = self.env['take_a_way_loyalty.progression_periode'].search([
-                ('mission_user_id', '=', mission_user.id),
-                ('periode_fin', '<', periode_debut)
-            ], order='periode_fin desc', limit=condition.nombre_periodes - 1)
+            limit = max(0, condition.nombre_periodes - 1)
+            if limit > 0:
+                periodes_precedentes = self.env['take_a_way_loyalty.progression_periode'].search([
+                    ('mission_user_id', '=', mission_user.id),
+                    ('periode_fin', '<', periode_debut)
+                ], order='periode_fin desc', limit=limit)
+            else:
+                periodes_precedentes = self.env['take_a_way_loyalty.progression_periode'].browse([])
 
             # Vérifier si toutes les périodes précédentes ont atteint leur objectif
             toutes_periodes_atteintes = True
@@ -475,7 +637,7 @@ class PosOrder(models.Model):
                         toutes_periodes_atteintes = False
                         break
 
-            if toutes_periodes_atteintes and len(periodes_precedentes) == condition.nombre_periodes - 1:
+            if toutes_periodes_atteintes and len(periodes_precedentes) == limit:
                 # La mission est complétée
                 mission_user.etat = 'termine'
                 # Ajouter les points de récompense
@@ -500,47 +662,32 @@ class PosOrder(models.Model):
             mission_user.progression = order_count
             self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
 
-    def _check_achat_toutes_categories_condition(self, order, condition, mission_user):
-        if not condition.categories_ids:
-            pos_products = self.env['product.product'].search([
-                '|',
-                ('available_in_pos', '=', True),
-                ('type', 'in', ['product', 'consu']),
-                ('sale_ok', '=', True)
+    def _check_categorie_produit_condition(self, order, condition, mission_user):
+        """Vérifie si l'utilisateur a acheté dans toutes les catégories PoS listées (au moins une fois dans chaque)."""
+        if condition.categories_ids:
+            # Récupérer toutes les commandes payées depuis le début de la mission
+            commandes = self.env['pos.order'].search([
+                ('partner_id', '=', order.partner_id.id),
+                ('state', '=', 'paid'),
+                ('date_order', '>=', mission_user.date_heure_debut)
             ])
-            
-            categories = pos_products.mapped('categ_id').filtered(
-                lambda c: c.name.lower() not in ['all', 'pos']
-            )
-            
-            if categories:
-                condition.write({'categories_ids': [(6, 0, categories.ids)]})
-            else:
-                return
-
-        categories = condition.categories_ids
-        categories_achetees = set()
-        
-        commandes = self.env['pos.order'].search([
-            ('partner_id', '=', order.partner_id.id),
-            ('state', '=', 'paid'),
-            ('date_order', '>=', mission_user.date_heure_debut)
-        ])
-        
-        for commande in commandes:
-            for ligne in commande.lines:
-                if ligne.product_id.categ_id in categories:
-                    categories_achetees.add(ligne.product_id.categ_id.id)
-        
-        mission_user.progression = len(categories_achetees)
-        
-        if len(categories_achetees) == len(categories):
-            mission_user.etat = 'termine'
-            points_record = self.env['take_a_way_loyalty.points_utilisateur'].search([
-                ('utilisateur_id', '=', mission_user.utilisateur_id.id)
-            ], limit=1)
-            if points_record:
-                points_record.points_total += mission_user.mission_id.point_recompense
+            categories_achetees = set()
+            for commande in commandes:
+                for ligne in commande.lines:
+                    tmpl = ligne.product_id.product_tmpl_id
+                    # Ajoute toutes les catégories PoS du produit
+                    if hasattr(tmpl, 'pos_categ_ids'):
+                        categories_achetees.update(tmpl.pos_categ_ids.ids)
+            # Log détaillé
+            _logger.info("[FIDELITE] CATEGORIE_PRODUIT - Catégories attendues: %s", condition.categories_ids.mapped('name'))
+            _logger.info("[FIDELITE] CATEGORIE_PRODUIT - Catégories achetées: %s", list(categories_achetees))
+            # Progression = nombre de catégories différentes déjà achetées
+            mission_user.progression = len(set(condition.categories_ids.ids) & categories_achetees)
+            _logger.info("[FIDELITE] CATEGORIE_PRODUIT - Progression calculée: %s/%s", mission_user.progression, len(condition.categories_ids))
+            # Si toutes les catégories sont cochées, mission terminée
+            if mission_user.progression == len(condition.categories_ids):
+                _logger.info("[FIDELITE] CATEGORIE_PRODUIT - Condition remplie pour l'utilisateur %s (toutes les catégories achetées)", mission_user.utilisateur_id.name)
+                self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
 
 class ProgressionProduit(models.Model):
     _name = 'take_a_way_loyalty.progression_produit'
