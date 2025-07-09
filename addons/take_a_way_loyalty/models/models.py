@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from odoo import models, fields, api
+from odoo import models, fields, api  # type: ignore
 import logging
 from datetime import datetime, timedelta
 
@@ -255,14 +255,13 @@ class MissionUser(models.Model):
                 })
             points_record.points_total += mission_user.mission_id.point_recompense
 
-    @api.model
-    def create(self, vals):
-        """Surcharge de la méthode create pour définir les valeurs par défaut."""
+    def _set_default_values(self, vals):
+        """Définit les valeurs par défaut pour la création."""
         if 'date_debut' not in vals:
             vals['date_debut'] = fields.Date.today()
         if 'progression' not in vals:
             vals['progression'] = 0
-        return super(MissionUser, self).create(vals)
+        return vals
 
     def action_ajouter_participant(self, partner_id):
         """Ajoute un participant à la mission."""
