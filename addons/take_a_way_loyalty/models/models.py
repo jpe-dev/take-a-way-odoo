@@ -206,15 +206,45 @@ class MissionUser(models.Model):
         conditions_remplies = True
         for condition in mission_user.mission_id.condition_ids:
             if condition.type_condition.code == 'ACHAT_PRODUIT':
+                _logger.warning("[FIDELITE][DEBUG] Vérification condition ACHAT_PRODUIT")
+                _logger.warning("[FIDELITE][DEBUG] Produits définis: %s", condition.produits_ids.mapped('name'))
+                _logger.warning("[FIDELITE][DEBUG] Quantités définies: %s", len(condition.quantites_produits))
+                _logger.warning("[FIDELITE][DEBUG] Produit unique: %s", condition.produit_id.name if condition.produit_id else "Aucun")
+                
                 # Gestion des produits multiples
                 if condition.produits_ids and condition.quantites_produits:
+                    _logger.warning("[FIDELITE][DEBUG] Utilisation de la logique produits multiples")
                     # Vérifier que tous les produits ont atteint leur quantité requise
                     for quantite_produit in condition.quantites_produits:
                         progression_produit = self.env['take_a_way_loyalty.progression_produit'].search([
                             ('mission_user_id', '=', mission_user.id),
                             ('produit_id', '=', quantite_produit.produit_id.id)
                         ], limit=1)
+                        _logger.warning("[FIDELITE][DEBUG] Produit %s: progression=%s, requise=%s, actuelle=%s", 
+                                       quantite_produit.produit_id.name, 
+                                       progression_produit.id if progression_produit else "Aucune",
+                                       quantite_produit.quantite_requise,
+                                       progression_produit.quantite_actuelle if progression_produit else 0)
                         if not progression_produit or progression_produit.quantite_actuelle < quantite_produit.quantite_requise:
+                            conditions_remplies = False
+                            break
+                    if not conditions_remplies:
+                        break
+                # Gestion des produits multiples sans quantités définies
+                elif condition.produits_ids and not condition.quantites_produits:
+                    _logger.warning("[FIDELITE][DEBUG] Vérification produits multiples sans quantités définies")
+                    # Vérifier que tous les produits ont atteint leur quantité requise
+                    for produit in condition.produits_ids:
+                        progression_produit = self.env['take_a_way_loyalty.progression_produit'].search([
+                            ('mission_user_id', '=', mission_user.id),
+                            ('produit_id', '=', produit.id)
+                        ], limit=1)
+                        _logger.warning("[FIDELITE][DEBUG] Produit %s: progression=%s, requise=%s, actuelle=%s", 
+                                       produit.name, 
+                                       progression_produit.id if progression_produit else "Aucune",
+                                       condition.quantite or 1,
+                                       progression_produit.quantite_actuelle if progression_produit else 0)
+                        if not progression_produit or progression_produit.quantite_actuelle < (condition.quantite or 1):
                             conditions_remplies = False
                             break
                     if not conditions_remplies:
@@ -414,6 +444,7 @@ class ConditionMission(models.Model):
                         'produit_id': produit.id,
                         'quantite_requise': 1
                     })]
+                _logger.warning("[FIDELITE][DEBUG] Quantités créées automatiquement pour %s produits", len(record.produits_ids))
 
     def action_reinitialiser_categories(self):
         self.ensure_one()
@@ -430,6 +461,20 @@ class ConditionMission(models.Model):
                 }
             }
         return False
+
+    @api.depends('quantites_produits')
+    def _compute_resume_quantites(self):
+        """Calcule un résumé des quantités définies pour l'affichage"""
+        for record in self:
+            if record.type_condition and record.type_condition.code == 'ACHAT_PRODUIT' and record.quantites_produits:
+                resume = []
+                for quantite_produit in record.quantites_produits:
+                    resume.append(f"{quantite_produit.produit_id.name}: {quantite_produit.quantite_requise}")
+                record.resume_quantites = ", ".join(resume)
+            else:
+                record.resume_quantites = ""
+
+    resume_quantites = fields.Char(compute='_compute_resume_quantites', string='Résumé des quantités', store=False)
 
     @api.model_create_multi
     def create(self, vals_list):
@@ -564,8 +609,14 @@ class PosOrder(models.Model):
                         self._check_categorie_produit_condition(order, condition, mission_user)
 
     def _check_product_condition(self, order, condition, mission_user):
+        _logger.warning("[FIDELITE][DEBUG] _check_product_condition appelée")
+        _logger.warning("[FIDELITE][DEBUG] Produits définis: %s", condition.produits_ids.mapped('name'))
+        _logger.warning("[FIDELITE][DEBUG] Quantités définies: %s", len(condition.quantites_produits))
+        _logger.warning("[FIDELITE][DEBUG] Produit unique: %s", condition.produit_id.name if condition.produit_id else "Aucun")
+        
         # Gestion des produits multiples
         if condition.produits_ids and condition.quantites_produits:
+            _logger.warning("[FIDELITE][DEBUG] Utilisation de la logique produits multiples avec quantités définies")
             for quantite_produit in condition.quantites_produits:
                 progression_produit = self.env['take_a_way_loyalty.progression_produit'].search([
                     ('mission_user_id', '=', mission_user.id),
@@ -580,6 +631,44 @@ class PosOrder(models.Model):
                         'quantite_actuelle': 0
                     })
 
+                            # Cumul sur toutes les commandes POS 'paid' du participant depuis le début de la mission
+            commandes = self.env['pos.order'].search([
+                ('partner_id', '=', order.partner_id.id),
+                ('state', '=', 'paid'),
+                ('date_order', '>=', mission_user.date_debut)
+            ])
+            _logger.warning("[FIDELITE][DEBUG] Commandes trouvées pour %s: %s", order.partner_id.name, len(commandes))
+            quantite_achetee = 0
+            for commande in commandes:
+                _logger.warning("[FIDELITE][DEBUG] Commande %s contient:", commande.id)
+                for line in commande.lines:
+                    _logger.warning("[FIDELITE][DEBUG]   - %s (qty: %s)", line.product_id.name, line.qty)
+                    if line.product_id.id == quantite_produit.produit_id.id:
+                        quantite_achetee += line.qty
+
+                progression_produit.write({
+                    'quantite_actuelle': quantite_achetee
+                })
+            # Vérifier si tous les produits ont atteint leur quantité requise
+            self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
+        # Gestion des produits multiples sans quantités définies (nouvelle logique simplifiée)
+        elif condition.produits_ids and not condition.quantites_produits:
+            _logger.warning("[FIDELITE][DEBUG] Utilisation de la logique produits multiples sans quantités définies")
+            # Utiliser la quantité globale pour tous les produits
+            for produit in condition.produits_ids:
+                progression_produit = self.env['take_a_way_loyalty.progression_produit'].search([
+                    ('mission_user_id', '=', mission_user.id),
+                    ('produit_id', '=', produit.id)
+                ], limit=1)
+
+                if not progression_produit:
+                    progression_produit = self.env['take_a_way_loyalty.progression_produit'].create({
+                        'mission_user_id': mission_user.id,
+                        'produit_id': produit.id,
+                        'quantite_requise': condition.quantite or 1,
+                        'quantite_actuelle': 0
+                    })
+
                 # Cumul sur toutes les commandes POS 'paid' du participant depuis le début de la mission
                 commandes = self.env['pos.order'].search([
                     ('partner_id', '=', order.partner_id.id),
@@ -589,7 +678,7 @@ class PosOrder(models.Model):
                 quantite_achetee = 0
                 for commande in commandes:
                     for line in commande.lines:
-                        if line.product_id.id == quantite_produit.produit_id.id:
+                        if line.product_id.id == produit.id:
                             quantite_achetee += line.qty
 
                 progression_produit.write({
@@ -624,10 +713,10 @@ class PosOrder(models.Model):
                     if line.product_id.id == condition.produit_id.id:
                         quantite_achetee += line.qty
 
-            progression_produit.write({
+                progression_produit.write({
                 'quantite_actuelle': quantite_achetee
-            })
-            self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
+                })
+                self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
 
     def _check_total_condition(self, order, condition, mission_user):
         if order.amount_total >= condition.montant_minimum:

@@ -206,6 +206,7 @@
                                     <field name="produits_ids" widget="many2many_tags"/>
                                     <field name="categories_ids" widget="many2many_tags"/>
                                     <field name="quantite"/>
+                                    <field name="resume_quantites" readonly="1" invisible="type_condition.code != 'ACHAT_PRODUIT' or not produits_ids"/>
                                     <field name="montant_minimum"/>
                                     <field name="nombre_commandes"/>
                                     <!-- Champs pour mission consécutive, tous éditables -->
@@ -215,6 +216,12 @@
                                     <field name="commandes_par_periode"/>
                                     <field name="montant_par_periode"/>
                                     <field name="type_condition_code" invisible="1"/>
+                                    <button name="%(take_a_way_loyalty.action_quantite_produit_wizard)d" 
+                                            string="Quantités par produit" 
+                                            type="action" 
+                                            class="btn-secondary"
+                                            invisible="type_condition.code != 'ACHAT_PRODUIT' or not produits_ids"
+                                            help="Définir les quantités requises pour chaque produit"/>
                                 </list>
                             </field>
                         </page>
@@ -417,20 +424,6 @@
               parent="menu_take_a_way_loyalty_root"
               action="action_progression_periode"
               sequence="30"/>
-
-    <!-- Action pour QuantiteProduit -->
-    <record id="action_quantite_produit" model="ir.actions.act_window">
-        <field name="name">Quantités par produit</field>
-        <field name="res_model">take_a_way_loyalty.quantite_produit</field>
-        <field name="view_mode">list,form</field>
-    </record>
-
-    <!-- Menu pour QuantiteProduit -->
-    <menuitem id="menu_quantite_produit"
-              name="Quantités par produit"
-              parent="menu_take_a_way_loyalty_root"
-              action="action_quantite_produit"
-              sequence="40"/>
 
     <!-- Type de mission -->
     <record id="type_mission_achats_jour" model="take_a_way_loyalty.type_mission">
