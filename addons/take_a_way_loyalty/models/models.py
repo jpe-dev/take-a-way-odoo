@@ -89,6 +89,8 @@ class Mission(models.Model):
         
         return True
 
+
+
     def test_missions_manual(self):
         """Test manuel des missions pour déboguer"""
         _logger.warning("[FIDELITE][DEBUG] Test manuel des missions appelé")
@@ -890,6 +892,66 @@ class ResPartner(models.Model):
         if not self.mission_id:
             return False
         return self.mission_id.action_ajouter_participant(self.id)
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        """Surcharge de la méthode create pour ajouter automatiquement les nouveaux contacts aux missions actives"""
+        partners = super(ResPartner, self).create(vals_list)
+        
+        for partner in partners:
+            # Vérifier si c'est un contact (pas une entreprise)
+            if not partner.is_company and partner.type == 'contact':
+                _logger.info("[FIDELITE] Nouveau contact créé: %s (ID: %s), ajout automatique aux missions actives", 
+                           partner.name, partner.id)
+                
+                # Récupérer toutes les missions actives
+                active_missions = self.env['take_a_way_loyalty.mission'].search([
+                    ('debut', '<=', fields.Date.today()),
+                    ('fin', '>=', fields.Date.today()),
+                ])
+                
+                _logger.info("[FIDELITE] Missions actives trouvées: %s", len(active_missions))
+                
+                for mission in active_missions:
+                    try:
+                        # Vérifier si le contact est déjà participant à cette mission
+                        existing_participant = self.env['take_a_way_loyalty.mission_user'].search([
+                            ('mission_id', '=', mission.id),
+                            ('utilisateur_id', '=', partner.id)
+                        ], limit=1)
+                        
+                        if not existing_participant:
+                            # Créer l'enregistrement des points si nécessaire
+                            points_record = self.env['take_a_way_loyalty.points_utilisateur'].search([
+                                ('utilisateur_id', '=', partner.id)
+                            ], limit=1)
+                            
+                            if not points_record:
+                                points_record = self.env['take_a_way_loyalty.points_utilisateur'].create({
+                                    'utilisateur_id': partner.id,
+                                    'points_total': 0
+                                })
+                            
+                            # Ajouter le contact comme participant à la mission
+                            mission_user = self.env['take_a_way_loyalty.mission_user'].create({
+                                'mission_id': mission.id,
+                                'utilisateur_id': partner.id,
+                                'date_debut': fields.Date.today(),
+                                'progression': 0,
+                                'etat': 'en_cours'
+                            })
+                            
+                            _logger.info("[FIDELITE] Contact %s ajouté automatiquement à la mission %s", 
+                                       partner.name, mission.name)
+                        else:
+                            _logger.info("[FIDELITE] Contact %s déjà participant à la mission %s", 
+                                       partner.name, mission.name)
+                            
+                    except Exception as e:
+                        _logger.error("[FIDELITE] Erreur lors de l'ajout automatique du contact %s à la mission %s: %s",
+                                    partner.name, mission.name, str(e))
+        
+        return partners
 
 class ProgressionPeriode(models.Model):
     _name = 'take_a_way_loyalty.progression_periode'

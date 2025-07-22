@@ -181,6 +181,7 @@
                             type="object" 
                             class="oe_highlight"
                             help="Ajoute automatiquement tous les contacts comme participants à cette mission"/>
+
                     <button name="test_missions_manual" 
                             string="Tester les missions" 
                             type="object" 
@@ -216,12 +217,6 @@
                                     <field name="commandes_par_periode"/>
                                     <field name="montant_par_periode"/>
                                     <field name="type_condition_code" invisible="1"/>
-                                    <button name="%(take_a_way_loyalty.action_quantite_produit_wizard)d" 
-                                            string="Quantités par produit" 
-                                            type="action" 
-                                            class="btn-secondary"
-                                            invisible="type_condition.code != 'ACHAT_PRODUIT' or not produits_ids"
-                                            help="Définir les quantités requises pour chaque produit"/>
                                 </list>
                             </field>
                         </page>
@@ -424,6 +419,8 @@
               parent="menu_take_a_way_loyalty_root"
               action="action_progression_periode"
               sequence="30"/>
+
+
 
     <!-- Type de mission -->
     <record id="type_mission_achats_jour" model="take_a_way_loyalty.type_mission">
