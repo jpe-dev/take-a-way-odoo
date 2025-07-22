@@ -73,7 +73,18 @@ class AccountMove(models.Model):
         return res
 
     def action_post(self):
-        """Action used to post invoice"""
+        """To check the selected customers due amount is exceed than blocking stage"""
+        pay_type = ['out_invoice', 'out_refund', 'out_receipt']
+        for rec in self:
+            if rec.partner_id.active_limit and rec.move_type in pay_type \
+                    and rec.partner_id.enable_credit_limit:
+                if rec.due_amount >= rec.partner_id.blocking_stage and rec.partner_id.blocking_stage != 0:
+                    raise UserError(_(
+                        "%s is in  Blocking Stage and "
+                        "has a due amount of %s %s to pay") % (
+                                        rec.partner_id.name, rec.due_amount,
+                                        rec.currency_id.symbol))
+
         result = super(AccountMove, self).action_post()
         for inv in self:
             context = dict(self.env.context)
@@ -85,21 +96,6 @@ class AccountMove(models.Model):
             context.pop('default_type', None)
             inv.invoice_line_ids.with_context(context).asset_create()
         return result
-
-    def action_post(self):
-        """To check the selected customers due amount is exceed than blocking stage"""
-        pay_type = ['out_invoice', 'out_refund', 'out_receipt']
-        for rec in self:
-            if rec.partner_id.active_limit and rec.move_type in pay_type \
-                    and rec.partner_id.enable_credit_limit:
-                if rec.due_amount >= rec.partner_id.blocking_stage:
-                    if rec.partner_id.blocking_stage != 0:
-                        raise UserError(_(
-                            "%s is in  Blocking Stage and "
-                            "has a due amount of %s %s to pay") % (
-                                            rec.partner_id.name, rec.due_amount,
-                                            rec.currency_id.symbol))
-        return super(AccountMove, self).action_post()
 
     @api.onchange('partner_id')
     def check_due(self):

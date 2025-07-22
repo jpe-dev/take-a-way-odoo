@@ -3,7 +3,7 @@
     <data noupdate="1">
         <record id="type_mission_achat_produit" model="take_a_way_loyalty.type_mission">
             <field name="code">ACHAT_PRODUIT</field>
-            <field name="libelle">Achat d'un produit spécifique</field>
+            <field name="libelle">Achat de produits spécifiques</field>
         </record>
 
         <record id="type_mission_total_commande" model="take_a_way_loyalty.type_mission">

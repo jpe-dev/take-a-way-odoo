@@ -10,6 +10,7 @@
                 <field name="mission_id"/>
                 <field name="type_condition"/>
                 <field name="produit_id"/>
+                <field name="produits_ids" widget="many2many_tags"/>
                 <field name="categorieProduit_id"/>
                 <field name="quantite"/>
                 <field name="montant_minimum"/>
@@ -54,6 +55,36 @@
         </field>
     </record>
 
+    <!-- Vue form pour QuantiteProduit -->
+    <record id="view_quantite_produit_form" model="ir.ui.view">
+        <field name="name">take_a_way_loyalty.quantite_produit.form</field>
+        <field name="model">take_a_way_loyalty.quantite_produit</field>
+        <field name="arch" type="xml">
+            <form>
+                <sheet>
+                    <group>
+                        <field name="condition_id"/>
+                        <field name="produit_id"/>
+                        <field name="quantite_requise"/>
+                    </group>
+                </sheet>
+            </form>
+        </field>
+    </record>
+
+    <!-- Vue tree pour QuantiteProduit -->
+    <record id="view_quantite_produit_tree" model="ir.ui.view">
+        <field name="name">take_a_way_loyalty.quantite_produit.tree</field>
+        <field name="model">take_a_way_loyalty.quantite_produit</field>
+        <field name="arch" type="xml">
+            <list>
+                <field name="condition_id"/>
+                <field name="produit_id"/>
+                <field name="quantite_requise"/>
+            </list>
+        </field>
+    </record>
+
     <!-- Vue form pour Condition Mission -->
     <record id="view_condition_mission_form" model="ir.ui.view">
         <field name="name">take_a_way_loyalty.condition_mission.form</field>
@@ -66,8 +97,21 @@
                         <field name="type_condition" options="{'no_create': True, 'no_open': True}"/>
                         <field name="produit_id" 
                                readonly="type_condition.code != 'ACHAT_PRODUIT'"
-                               required="type_condition.code == 'ACHAT_PRODUIT'"
-                               invisible="type_condition.code != 'ACHAT_PRODUIT'"/>
+                               required="type_condition.code == 'ACHAT_PRODUIT' and not produits_ids"
+                               invisible="type_condition.code != 'ACHAT_PRODUIT' or produits_ids"/>
+                        <field name="produits_ids"
+                               widget="many2many_tags"
+                               readonly="type_condition.code != 'ACHAT_PRODUIT'"
+                               required="type_condition.code == 'ACHAT_PRODUIT' and not produit_id"
+                               invisible="type_condition.code != 'ACHAT_PRODUIT' or produit_id"/>
+                        <field name="quantites_produits"
+                               readonly="type_condition.code != 'ACHAT_PRODUIT' or not produits_ids"
+                               invisible="type_condition.code != 'ACHAT_PRODUIT' or not produits_ids">
+                            <list editable="bottom">
+                                <field name="produit_id" readonly="1"/>
+                                <field name="quantite_requise"/>
+                            </list>
+                        </field>
                         <field name="categories_ids"
                                domain="[('id', 'in', parent.mission_id.pos_config_id.iface_available_categ_ids)]"
                                widget="many2many_tags"
@@ -159,6 +203,7 @@
                                 <list editable="bottom">
                                     <field name="type_condition"/>
                                     <field name="produit_id"/>
+                                    <field name="produits_ids" widget="many2many_tags"/>
                                     <field name="categories_ids" widget="many2many_tags"/>
                                     <field name="quantite"/>
                                     <field name="montant_minimum"/>
@@ -306,6 +351,7 @@
                 <field name="mission_id"/>
                 <field name="type_condition"/>
                 <field name="produit_id"/>
+                <field name="produits_ids" widget="many2many_tags"/>
                 <field name="categorieProduit_id"/>
                 <field name="quantite"/>
                 <field name="montant_minimum"/>
@@ -371,6 +417,20 @@
               parent="menu_take_a_way_loyalty_root"
               action="action_progression_periode"
               sequence="30"/>
+
+    <!-- Action pour QuantiteProduit -->
+    <record id="action_quantite_produit" model="ir.actions.act_window">
+        <field name="name">Quantités par produit</field>
+        <field name="res_model">take_a_way_loyalty.quantite_produit</field>
+        <field name="view_mode">list,form</field>
+    </record>
+
+    <!-- Menu pour QuantiteProduit -->
+    <menuitem id="menu_quantite_produit"
+              name="Quantités par produit"
+              parent="menu_take_a_way_loyalty_root"
+              action="action_quantite_produit"
+              sequence="40"/>
 
     <!-- Type de mission -->
     <record id="type_mission_achats_jour" model="take_a_way_loyalty.type_mission">
