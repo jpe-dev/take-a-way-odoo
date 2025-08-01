@@ -968,20 +968,8 @@ class ProgressionPeriode(models.Model):
          'Une période ne peut être suivie qu\'une seule fois par mission!')
     ]
 
-# from odoo import models, fields, api
+class ProductTemplate(models.Model):
+    _inherit = 'product.template'
 
-
-# class take_a_way_loyalty(models.Model):
-#     _name = 'take_a_way_loyalty.take_a_way_loyalty'
-#     _description = 'take_a_way_loyalty.take_a_way_loyalty'
-
-#     name = fields.Char()
-#     value = fields.Integer()
-#     value2 = fields.Float(compute="_value_pc", store=True)
-#     description = fields.Text()
-#
-#     @api.depends('value')
-#     def _value_pc(self):
-#         for record in self:
-#             record.value2 = float(record.value) / 100
+    disponibilite_inventaire = fields.Boolean(string='Disponible en inventaire', default=True)
 
