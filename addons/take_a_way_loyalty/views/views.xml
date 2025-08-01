@@ -9,7 +9,6 @@
             <list>
                 <field name="mission_id"/>
                 <field name="type_condition"/>
-                <field name="produit_id"/>
                 <field name="produits_ids" widget="many2many_tags"/>
                 <field name="categorieProduit_id"/>
                 <field name="quantite"/>
@@ -95,15 +94,11 @@
                     <group>
                         <field name="mission_id"/>
                         <field name="type_condition" options="{'no_create': True, 'no_open': True}"/>
-                        <field name="produit_id" 
-                               readonly="type_condition.code != 'ACHAT_PRODUIT'"
-                               required="type_condition.code == 'ACHAT_PRODUIT' and not produits_ids"
-                               invisible="type_condition.code != 'ACHAT_PRODUIT' or produits_ids"/>
                         <field name="produits_ids"
                                widget="many2many_tags"
                                readonly="type_condition.code != 'ACHAT_PRODUIT'"
-                               required="type_condition.code == 'ACHAT_PRODUIT' and not produit_id"
-                               invisible="type_condition.code != 'ACHAT_PRODUIT' or produit_id"/>
+                               required="type_condition.code == 'ACHAT_PRODUIT'"
+                               invisible="type_condition.code != 'ACHAT_PRODUIT'"/>
                         <field name="quantites_produits"
                                readonly="type_condition.code != 'ACHAT_PRODUIT' or not produits_ids"
                                invisible="type_condition.code != 'ACHAT_PRODUIT' or not produits_ids">
@@ -203,7 +198,6 @@
                             <field name="condition_ids">
                                 <list editable="bottom">
                                     <field name="type_condition"/>
-                                    <field name="produit_id"/>
                                     <field name="produits_ids" widget="many2many_tags"/>
                                     <field name="categories_ids" widget="many2many_tags"/>
                                     <field name="quantite"/>
@@ -352,7 +346,6 @@
             <list>
                 <field name="mission_id"/>
                 <field name="type_condition"/>
-                <field name="produit_id"/>
                 <field name="produits_ids" widget="many2many_tags"/>
                 <field name="categorieProduit_id"/>
                 <field name="quantite"/>
