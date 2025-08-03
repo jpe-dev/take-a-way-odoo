@@ -114,7 +114,9 @@
                                required="type_condition.code == 'CATEGORIE_PRODUIT'"
                                invisible="type_condition.code != 'CATEGORIE_PRODUIT'"/>
                         <field name="quantite" 
-                               invisible="type_condition.code not in ['ACHAT_PRODUIT', 'CATEGORIE_PRODUIT']"/>
+                               readonly="type_condition.code not in ['ACHAT_PRODUIT', 'CATEGORIE_PRODUIT', 'PARRAINAGE']"
+                               required="type_condition.code in ['ACHAT_PRODUIT', 'CATEGORIE_PRODUIT', 'PARRAINAGE']"
+                               invisible="type_condition.code not in ['ACHAT_PRODUIT', 'CATEGORIE_PRODUIT', 'PARRAINAGE']"/>
                         <field name="montant_minimum" 
                                readonly="type_condition.code != 'TOTAL_COMMANDE'"
                                required="type_condition.code == 'TOTAL_COMMANDE'"
@@ -283,6 +285,33 @@
                         type="object" 
                         class="oe_highlight"
                         invisible="not mission_id"/>
+                <button name="%(action_parrainage_wizard)d" 
+                        string="Saisir un code de parrainage" 
+                        type="action" 
+                        class="btn-secondary"
+                        invisible="is_company or parrain_id"
+                        context="{'default_partner_id': active_id}"/>
+            </xpath>
+            <xpath expr="//notebook" position="inside">
+                <page string="Parrainage" invisible="is_company">
+                    <group>
+                        <group string="Informations de parrainage">
+                            <field name="code_parrainage" readonly="1"/>
+                            <field name="parrain_id"/>
+                            <field name="nombre_filleuls" readonly="1"/>
+                        </group>
+                        <group string="Filleuls" invisible="not filleuls_ids">
+                            <field name="filleuls_ids" readonly="1">
+                                <list>
+                                    <field name="name"/>
+                                    <field name="email"/>
+                                    <field name="phone"/>
+                                    <field name="code_parrainage"/>
+                                </list>
+                            </field>
+                        </group>
+                    </group>
+                </page>
             </xpath>
         </field>
     </record>

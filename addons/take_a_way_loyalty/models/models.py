@@ -596,6 +596,8 @@ class PosOrder(models.Model):
                         self._check_achats_jour_condition(order, condition, mission_user)
                     elif condition.type_condition.code == 'CATEGORIE_PRODUIT':
                         self._check_categorie_produit_condition(order, condition, mission_user)
+                    elif condition.type_condition.code == 'PARRAINAGE':
+                        self._check_parrainage_condition(order, condition, mission_user)
 
     def _check_product_condition(self, order, condition, mission_user):
         _logger.warning("[FIDELITE][DEBUG] _check_product_condition appelée")
@@ -810,6 +812,33 @@ class PosOrder(models.Model):
                 _logger.info("[FIDELITE] CATEGORIE_PRODUIT - Condition remplie pour l'utilisateur %s (toutes les catégories achetées)", mission_user.utilisateur_id.name)
                 self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
 
+    def _check_parrainage_condition(self, order, condition, mission_user):
+        """Vérifie si l'utilisateur a parrainé le nombre requis de nouveaux clients."""
+        # Compter le nombre de filleuls actifs (qui ont fait au moins une commande)
+        filleuls_actifs = 0
+        
+        for filleul in mission_user.utilisateur_id.filleuls_ids:
+            # Vérifier si le filleul a fait au moins une commande depuis le début de la mission
+            commandes_filleul = self.env['pos.order'].search([
+                ('partner_id', '=', filleul.id),
+                ('state', '=', 'paid'),
+                ('date_order', '>=', mission_user.date_heure_debut)
+            ], limit=1)
+            
+            if commandes_filleul:
+                filleuls_actifs += 1
+        
+        # Mettre à jour la progression
+        mission_user.progression = filleuls_actifs
+        
+        _logger.info("[FIDELITE] PARRAINAGE - Utilisateur %s a %s filleuls actifs sur %s requis", 
+                    mission_user.utilisateur_id.name, filleuls_actifs, condition.quantite or 1)
+        
+        # Vérifier si la condition est remplie
+        if filleuls_actifs >= (condition.quantite or 1):
+            _logger.info("[FIDELITE] PARRAINAGE - Condition remplie pour l'utilisateur %s", mission_user.utilisateur_id.name)
+            self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
+
 class QuantiteProduit(models.Model):
     _name = 'take_a_way_loyalty.quantite_produit'
     _description = 'Quantité requise par produit pour une condition de mission'
@@ -841,19 +870,85 @@ class ResPartner(models.Model):
     _inherit = 'res.partner'
 
     mission_id = fields.Many2one('take_a_way_loyalty.mission', string='Mission', ondelete='cascade')
-
-    def action_ajouter_participant(self):
-        """Ajoute le client comme participant à la mission."""
-        if not self.mission_id:
+    
+    # Champs pour le système de parrainage
+    code_parrainage = fields.Char(string='Code de parrainage', readonly=True, copy=False, help='Code unique généré automatiquement pour le parrainage')
+    parrain_id = fields.Many2one('res.partner', string='Parrain', domain=[('is_company', '=', False), ('type', '=', 'contact')], help='Contact qui a parrainé ce client')
+    filleuls_ids = fields.One2many('res.partner', 'parrain_id', string='Filleuls', help='Clients parrainés par ce contact')
+    nombre_filleuls = fields.Integer(string='Nombre de filleuls', compute='_compute_nombre_filleuls', store=True)
+    
+    _sql_constraints = [
+        ('unique_code_parrainage', 'UNIQUE(code_parrainage)', 'Le code de parrainage doit être unique!')
+    ]
+    
+    @api.depends('filleuls_ids')
+    def _compute_nombre_filleuls(self):
+        for partner in self:
+            partner.nombre_filleuls = len(partner.filleuls_ids)
+    
+    def _generate_parrainage_code(self):
+        """Génère un code de parrainage unique de 6 chiffres"""
+        import random
+        while True:
+            code = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+            # Vérifier que le code n'existe pas déjà
+            existing = self.search([('code_parrainage', '=', code)], limit=1)
+            if not existing:
+                return code
+    
+    def action_utiliser_code_parrainage(self, code_parrainage):
+        """Utilise un code de parrainage pour définir le parrain"""
+        if not code_parrainage:
             return False
-        return self.mission_id.action_ajouter_participant(self.id)
-
+        
+        # Rechercher le parrain par son code
+        parrain = self.search([('code_parrainage', '=', code_parrainage)], limit=1)
+        
+        if not parrain:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Code invalide',
+                    'message': 'Le code de parrainage saisi n\'existe pas.',
+                    'type': 'warning',
+                }
+            }
+        
+        if parrain.id == self.id:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Code invalide',
+                    'message': 'Vous ne pouvez pas vous parrainer vous-même.',
+                    'type': 'warning',
+                }
+            }
+        
+        # Définir le parrain
+        self.parrain_id = parrain.id
+        
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Parrainage effectué',
+                'message': f'Vous avez été parrainé par {parrain.name}.',
+                'type': 'success',
+            }
+        }
+    
     @api.model_create_multi
     def create(self, vals_list):
-        """Surcharge de la méthode create pour ajouter automatiquement les nouveaux contacts aux missions actives"""
+        """Surcharge de la méthode create pour générer le code de parrainage et ajouter automatiquement les nouveaux contacts aux missions actives"""
         partners = super(ResPartner, self).create(vals_list)
         
         for partner in partners:
+            # Générer un code de parrainage pour les nouveaux contacts
+            if not partner.is_company and partner.type == 'contact' and not partner.code_parrainage:
+                partner.code_parrainage = partner._generate_parrainage_code()
+                
             # Vérifier si c'est un contact (pas une entreprise)
             if not partner.is_company and partner.type == 'contact':
                 _logger.info("[FIDELITE] Nouveau contact créé: %s (ID: %s), ajout automatique aux missions actives", 
@@ -907,6 +1002,12 @@ class ResPartner(models.Model):
                                     partner.name, mission.name, str(e))
         
         return partners
+
+    def action_ajouter_participant(self):
+        """Ajoute le client comme participant à la mission."""
+        if not self.mission_id:
+            return False
+        return self.mission_id.action_ajouter_participant(self.id)
 
 class ProgressionPeriode(models.Model):
     _name = 'take_a_way_loyalty.progression_periode'

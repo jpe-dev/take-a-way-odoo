@@ -1,14 +1,12 @@
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-from . import controllers
-from . import models
-from . import wizards
+"""
+Script de migration pour générer des codes de parrainage pour les contacts existants
+"""
 
-# Hook de migration pour générer les codes de parrainage
-def post_init_hook(cr, registry):
-    """Hook appelé après l'installation/mise à jour du module"""
-    from odoo import api, SUPERUSER_ID
-    env = api.Environment(cr, SUPERUSER_ID, {})
+def migrate_parrainage_codes(env):
+    """Migration pour générer des codes de parrainage pour les contacts existants"""
     
     # Rechercher tous les contacts sans code de parrainage
     contacts_sans_code = env['res.partner'].search([
@@ -29,3 +27,9 @@ def post_init_hook(cr, registry):
             print(f"Erreur lors de la génération du code pour {contact.name}: {str(e)}")
     
     print("Migration des codes de parrainage terminée")
+
+# Cette fonction sera appelée lors de la mise à jour du module
+def post_init_hook(cr, registry):
+    """Hook appelé après l'installation/mise à jour du module"""
+    env = api.Environment(cr, SUPERUSER_ID, {})
+    migrate_parrainage_codes(env) 

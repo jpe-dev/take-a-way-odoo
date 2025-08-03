@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        <!-- Exemple de mission de parrainage -->
+        <record id="demo_mission_parrainage" model="take_a_way_loyalty.mission">
+            <field name="name">Mission Parrainage</field>
+            <field name="description">Parrainez 2 nouveaux clients pour gagner des points de fidélité</field>
+            <field name="point_recompense">100</field>
+            <field name="debut" eval="(DateTime.now() - timedelta(days=30)).strftime('%Y-%m-%d')"/>
+            <field name="fin" eval="(DateTime.now() + timedelta(days=60)).strftime('%Y-%m-%d')"/>
+            <field name="cumulable">True</field>
+        </record>
+
+        <!-- Condition pour la mission de parrainage -->
+        <record id="demo_condition_parrainage" model="take_a_way_loyalty.condition_mission">
+            <field name="mission_id" ref="demo_mission_parrainage"/>
+            <field name="type_condition" ref="type_mission_parrainage"/>
+            <field name="quantite">2</field>
+        </record>
+    </data>
+</odoo> 

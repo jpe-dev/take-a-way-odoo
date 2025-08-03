@@ -23,11 +23,15 @@
         'security/ir.model.access.csv',
         'data/type_mission_data.xml',
         'views/add_participant_wizard_views.xml',
+        'views/parrainage_wizard_views.xml',
         'views/views.xml',
     ],
     # only loaded in demonstration mode
-    'demo': [],
+    'demo': [
+        'data/demo_parrainage_mission.xml',
+    ],
     'installable': True,
     'application': True,
+    'post_init_hook': 'post_init_hook',
 }
 
