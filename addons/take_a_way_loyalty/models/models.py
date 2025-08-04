@@ -551,51 +551,59 @@ class PosOrder(models.Model):
             
             _logger.warning("[FIDELITE][DEBUG] Missions trouvées dans la période: %s", len(missions))
 
-            for mission in missions:
-                _logger.warning("[FIDELITE][DEBUG] Vérification de la mission: %s", mission.name)
+            # Liste des utilisateurs à vérifier (le partenaire de la commande + ses parrains)
+            users_to_check = []
+            
+            # Vérifier si la commande a un partenaire
+            if order.partner_id:
+                users_to_check.append(order.partner_id)
                 
-                # Vérifier si la commande a un partenaire
-                if not order.partner_id:
-                    _logger.warning("[FIDELITE][DEBUG] Commande %s n'a pas de partenaire, impossible de vérifier les missions", order.id)
-                    continue
-                
-                mission_user = self.env['take_a_way_loyalty.mission_user'].search([
-                    ('mission_id', '=', mission.id),
-                    ('utilisateur_id', '=', order.partner_id.id),
-                    ('etat', '=', 'en_cours')
-                ], limit=1)
+                # Pour les missions de parrainage, ajouter aussi les parrains du partenaire
+                if order.partner_id.parrain_id:
+                    users_to_check.append(order.partner_id.parrain_id)
+                    _logger.warning("[FIDELITE][DEBUG] Ajout du parrain %s (ID: %s) à la vérification", 
+                                   order.partner_id.parrain_id.name, order.partner_id.parrain_id.id)
+            else:
+                _logger.warning("[FIDELITE][DEBUG] Commande %s n'a pas de partenaire, impossible de vérifier les missions", order.id)
+                continue
 
-                if not mission_user:
-                    _logger.warning("[FIDELITE][DEBUG] Aucun mission_user trouvé pour la mission %s et l'utilisateur %s (ID: %s)", 
-                                   mission.name, order.partner_id.name, order.partner_id.id)
+            # Vérifier les missions pour chaque utilisateur
+            for user in users_to_check:
+                _logger.warning("[FIDELITE][DEBUG] Vérification des missions pour l'utilisateur: %s (ID: %s)", user.name, user.id)
+                
+                for mission in missions:
+                    _logger.warning("[FIDELITE][DEBUG] Vérification de la mission: %s", mission.name)
                     
-                    # Vérifier tous les mission_users pour cette mission
-                    all_mission_users = self.env['take_a_way_loyalty.mission_user'].search([
-                        ('mission_id', '=', mission.id)
-                    ])
-                    _logger.warning("[FIDELITE][DEBUG] Tous les mission_users pour cette mission: %s", len(all_mission_users))
-                    for mu in all_mission_users:
-                        _logger.warning("[FIDELITE][DEBUG] Mission_user: %s (utilisateur: %s, état: %s)", 
-                                       mu.id, mu.utilisateur_id.name, mu.etat)
-                    continue
+                    mission_user = self.env['take_a_way_loyalty.mission_user'].search([
+                        ('mission_id', '=', mission.id),
+                        ('utilisateur_id', '=', user.id),
+                        ('etat', '=', 'en_cours')
+                    ], limit=1)
 
-                _logger.warning("[FIDELITE][DEBUG] Mission_user trouvé: %s, progression actuelle: %s", 
-                               mission_user.id, mission_user.progression)
+                    if not mission_user:
+                        _logger.warning("[FIDELITE][DEBUG] Aucun mission_user trouvé pour la mission %s et l'utilisateur %s (ID: %s)", 
+                                       mission.name, user.name, user.id)
+                        continue
 
-                for condition in mission.condition_ids:
-                    _logger.warning("[FIDELITE][DEBUG] Vérification de la condition: %s", condition.type_condition.code)
-                    if condition.type_condition.code == 'ACHAT_PRODUIT':
-                        self._check_product_condition(order, condition, mission_user)
-                    elif condition.type_condition.code == 'TOTAL_COMMANDE':
-                        self._check_total_condition(order, condition, mission_user)
-                    elif condition.type_condition.code == 'NOMBRE_COMMANDE':
-                        self._check_order_count_condition(order, condition, mission_user)
-                    elif condition.type_condition.code == 'CONSECUTIVE':
-                        self._check_consecutive_condition(order, condition, mission_user)
-                    elif condition.type_condition.code == 'ACHATS_JOUR':
-                        self._check_achats_jour_condition(order, condition, mission_user)
-                    elif condition.type_condition.code == 'CATEGORIE_PRODUIT':
-                        self._check_categorie_produit_condition(order, condition, mission_user)
+                    _logger.warning("[FIDELITE][DEBUG] Mission_user trouvé: %s, progression actuelle: %s", 
+                                   mission_user.id, mission_user.progression)
+
+                    for condition in mission.condition_ids:
+                        _logger.warning("[FIDELITE][DEBUG] Vérification de la condition: %s", condition.type_condition.code)
+                        if condition.type_condition.code == 'ACHAT_PRODUIT':
+                            self._check_product_condition(order, condition, mission_user)
+                        elif condition.type_condition.code == 'TOTAL_COMMANDE':
+                            self._check_total_condition(order, condition, mission_user)
+                        elif condition.type_condition.code == 'NOMBRE_COMMANDE':
+                            self._check_order_count_condition(order, condition, mission_user)
+                        elif condition.type_condition.code == 'CONSECUTIVE':
+                            self._check_consecutive_condition(order, condition, mission_user)
+                        elif condition.type_condition.code == 'ACHATS_JOUR':
+                            self._check_achats_jour_condition(order, condition, mission_user)
+                        elif condition.type_condition.code == 'CATEGORIE_PRODUIT':
+                            self._check_categorie_produit_condition(order, condition, mission_user)
+                        elif condition.type_condition.code == 'PARRAINAGE':
+                            self._check_parrainage_condition(order, condition, mission_user)
 
     def _check_product_condition(self, order, condition, mission_user):
         _logger.warning("[FIDELITE][DEBUG] _check_product_condition appelée")
@@ -619,10 +627,10 @@ class PosOrder(models.Model):
                         'quantite_actuelle': 0
                     })
 
-                # Cumul sur toutes les commandes POS 'paid' du participant depuis le début de la mission
+                # Cumul sur toutes les commandes POS 'paid', 'done', 'invoiced' du participant depuis le début de la mission
                 commandes = self.env['pos.order'].search([
                     ('partner_id', '=', order.partner_id.id),
-                    ('state', '=', 'paid'),
+                    ('state', 'in', ['paid', 'done', 'invoiced']),
                     ('date_order', '>=', mission_user.date_debut)
                 ])
                 _logger.warning("[FIDELITE][DEBUG] Commandes trouvées pour %s: %s", order.partner_id.name, len(commandes))
@@ -657,10 +665,10 @@ class PosOrder(models.Model):
                         'quantite_actuelle': 0
                     })
 
-                # Cumul sur toutes les commandes POS 'paid' du participant depuis le début de la mission
+                # Cumul sur toutes les commandes POS 'paid', 'done', 'invoiced' du participant depuis le début de la mission
                 commandes = self.env['pos.order'].search([
                     ('partner_id', '=', order.partner_id.id),
-                    ('state', '=', 'paid'),
+                    ('state', 'in', ['paid', 'done', 'invoiced']),
                     ('date_order', '>=', mission_user.date_debut)
                 ])
                 quantite_achetee = 0
@@ -681,10 +689,10 @@ class PosOrder(models.Model):
             self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
 
     def _check_order_count_condition(self, order, condition, mission_user):
-        # Utiliser le statut 'paid' pour les commandes POS en Odoo 18
+        # Utiliser les statuts 'paid', 'done', 'invoiced' pour les commandes POS en Odoo 18
         order_count = self.env['pos.order'].search_count([
             ('partner_id', '=', order.partner_id.id),
-            ('state', '=', 'paid'),  # statut correct pour Odoo 18
+            ('state', 'in', ['paid', 'done', 'invoiced']),  # statut correct pour Odoo 18
             ('date_order', '>=', mission_user.date_debut)
         ])
         mission_user.progression = order_count
@@ -772,10 +780,10 @@ class PosOrder(models.Model):
         """Vérifie si l'utilisateur a fait 2 achats dans la même journée."""
         # On récupère la date de la commande (sans l'heure)
         date_order = fields.Date.from_string(order.date_order)
-        # On compte les commandes 'paid' du jour pour ce user
+        # On compte les commandes 'paid', 'done', 'invoiced' du jour pour ce user
         order_count = self.env['pos.order'].search_count([
             ('partner_id', '=', order.partner_id.id),
-            ('state', '=', 'paid'),
+            ('state', 'in', ['paid', 'done', 'invoiced']),
             ('date_order', '>=', date_order.strftime('%Y-%m-%d') + " 00:00:00"),
             ('date_order', '<=', date_order.strftime('%Y-%m-%d') + " 23:59:59"),
         ])
@@ -789,7 +797,7 @@ class PosOrder(models.Model):
             # Récupérer toutes les commandes payées depuis le début de la mission
             commandes = self.env['pos.order'].search([
                 ('partner_id', '=', order.partner_id.id),
-                ('state', '=', 'paid'),
+                ('state', 'in', ['paid', 'done', 'invoiced']),
                 ('date_order', '>=', mission_user.date_heure_debut)
             ])
             categories_achetees = set()
@@ -809,6 +817,50 @@ class PosOrder(models.Model):
             if mission_user.progression == len(condition.categories_ids):
                 _logger.info("[FIDELITE] CATEGORIE_PRODUIT - Condition remplie pour l'utilisateur %s (toutes les catégories achetées)", mission_user.utilisateur_id.name)
                 self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
+
+    def _check_parrainage_condition(self, order, condition, mission_user):
+        """Vérifie si l'utilisateur a parrainé le nombre requis de nouveaux clients."""
+        # Compter le nombre de filleuls actifs (qui ont fait au moins une commande)
+        filleuls_actifs = 0
+        
+        _logger.warning("[FIDELITE][DEBUG] PARRAINAGE - Vérification pour l'utilisateur %s (ID: %s)", 
+                       mission_user.utilisateur_id.name, mission_user.utilisateur_id.id)
+        _logger.warning("[FIDELITE][DEBUG] PARRAINAGE - Nombre total de filleuls: %s", 
+                       len(mission_user.utilisateur_id.filleuls_ids))
+        
+        for filleul in mission_user.utilisateur_id.filleuls_ids:
+            _logger.warning("[FIDELITE][DEBUG] PARRAINAGE - Vérification du filleul: %s (ID: %s)", 
+                           filleul.name, filleul.id)
+            
+            # Vérifier si le filleul a fait au moins une commande depuis le début de la mission
+            # Utiliser les statuts 'paid', 'done' et 'invoiced' pour Odoo 18
+            commandes_filleul = self.env['pos.order'].search([
+                ('partner_id', '=', filleul.id),
+                ('state', 'in', ['paid', 'done', 'invoiced']),
+                ('date_order', '>=', mission_user.date_heure_debut)
+            ])
+            
+            _logger.warning("[FIDELITE][DEBUG] PARRAINAGE - Commandes trouvées pour le filleul %s: %s", 
+                           filleul.name, len(commandes_filleul))
+            
+            if commandes_filleul:
+                filleuls_actifs += 1
+                _logger.warning("[FIDELITE][DEBUG] PARRAINAGE - Filleul %s est actif (a fait des commandes)", 
+                               filleul.name)
+            else:
+                _logger.warning("[FIDELITE][DEBUG] PARRAINAGE - Filleul %s n'a pas fait de commandes depuis %s", 
+                               filleul.name, mission_user.date_heure_debut)
+        
+        # Mettre à jour la progression
+        mission_user.progression = filleuls_actifs
+        
+        _logger.info("[FIDELITE] PARRAINAGE - Utilisateur %s a %s filleuls actifs sur %s requis", 
+                    mission_user.utilisateur_id.name, filleuls_actifs, condition.quantite or 1)
+        
+        # Vérifier si la condition est remplie
+        if filleuls_actifs >= (condition.quantite or 1):
+            _logger.info("[FIDELITE] PARRAINAGE - Condition remplie pour l'utilisateur %s", mission_user.utilisateur_id.name)
+            self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
 
 class QuantiteProduit(models.Model):
     _name = 'take_a_way_loyalty.quantite_produit'
@@ -841,19 +893,85 @@ class ResPartner(models.Model):
     _inherit = 'res.partner'
 
     mission_id = fields.Many2one('take_a_way_loyalty.mission', string='Mission', ondelete='cascade')
-
-    def action_ajouter_participant(self):
-        """Ajoute le client comme participant à la mission."""
-        if not self.mission_id:
+    
+    # Champs pour le système de parrainage
+    code_parrainage = fields.Char(string='Code de parrainage', readonly=True, copy=False, help='Code unique généré automatiquement pour le parrainage')
+    parrain_id = fields.Many2one('res.partner', string='Parrain', domain=[('is_company', '=', False), ('type', '=', 'contact')], help='Contact qui a parrainé ce client')
+    filleuls_ids = fields.One2many('res.partner', 'parrain_id', string='Filleuls', help='Clients parrainés par ce contact')
+    nombre_filleuls = fields.Integer(string='Nombre de filleuls', compute='_compute_nombre_filleuls', store=True)
+    
+    _sql_constraints = [
+        ('unique_code_parrainage', 'UNIQUE(code_parrainage)', 'Le code de parrainage doit être unique!')
+    ]
+    
+    @api.depends('filleuls_ids')
+    def _compute_nombre_filleuls(self):
+        for partner in self:
+            partner.nombre_filleuls = len(partner.filleuls_ids)
+    
+    def _generate_parrainage_code(self):
+        """Génère un code de parrainage unique de 6 chiffres"""
+        import random
+        while True:
+            code = ''.join([str(random.randint(0, 9)) for _ in range(6)])
+            # Vérifier que le code n'existe pas déjà
+            existing = self.search([('code_parrainage', '=', code)], limit=1)
+            if not existing:
+                return code
+    
+    def action_utiliser_code_parrainage(self, code_parrainage):
+        """Utilise un code de parrainage pour définir le parrain"""
+        if not code_parrainage:
             return False
-        return self.mission_id.action_ajouter_participant(self.id)
-
+        
+        # Rechercher le parrain par son code
+        parrain = self.search([('code_parrainage', '=', code_parrainage)], limit=1)
+        
+        if not parrain:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Code invalide',
+                    'message': 'Le code de parrainage saisi n\'existe pas.',
+                    'type': 'warning',
+                }
+            }
+        
+        if parrain.id == self.id:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Code invalide',
+                    'message': 'Vous ne pouvez pas vous parrainer vous-même.',
+                    'type': 'warning',
+                }
+            }
+        
+        # Définir le parrain
+        self.parrain_id = parrain.id
+        
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Parrainage effectué',
+                'message': f'Vous avez été parrainé par {parrain.name}.',
+                'type': 'success',
+            }
+        }
+    
     @api.model_create_multi
     def create(self, vals_list):
-        """Surcharge de la méthode create pour ajouter automatiquement les nouveaux contacts aux missions actives"""
+        """Surcharge de la méthode create pour générer le code de parrainage et ajouter automatiquement les nouveaux contacts aux missions actives"""
         partners = super(ResPartner, self).create(vals_list)
         
         for partner in partners:
+            # Générer un code de parrainage pour les nouveaux contacts
+            if not partner.is_company and partner.type == 'contact' and not partner.code_parrainage:
+                partner.code_parrainage = partner._generate_parrainage_code()
+                
             # Vérifier si c'est un contact (pas une entreprise)
             if not partner.is_company and partner.type == 'contact':
                 _logger.info("[FIDELITE] Nouveau contact créé: %s (ID: %s), ajout automatique aux missions actives", 
@@ -907,6 +1025,12 @@ class ResPartner(models.Model):
                                     partner.name, mission.name, str(e))
         
         return partners
+
+    def action_ajouter_participant(self):
+        """Ajoute le client comme participant à la mission."""
+        if not self.mission_id:
+            return False
+        return self.mission_id.action_ajouter_participant(self.id)
 
 class ProgressionPeriode(models.Model):
     _name = 'take_a_way_loyalty.progression_periode'

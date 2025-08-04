@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data>
+        <!-- Vue form pour le wizard de parrainage -->
+        <record id="view_parrainage_wizard_form" model="ir.ui.view">
+            <field name="name">parrainage.wizard.form</field>
+            <field name="model">parrainage.wizard</field>
+            <field name="arch" type="xml">
+                <form string="Saisir un code de parrainage">
+                    <sheet>
+                        <group>
+                            <field name="partner_id" readonly="1"/>
+                            <field name="code_parrainage" placeholder="Ex: 123456"/>
+                        </group>
+                    </sheet>
+                    <footer>
+                        <button name="action_utiliser_code_parrainage" 
+                                string="Utiliser ce code" 
+                                type="object" 
+                                class="btn-primary"/>
+                        <button string="Annuler" 
+                                class="btn-secondary" 
+                                special="cancel"/>
+                    </footer>
+                </form>
+            </field>
+        </record>
+
+        <!-- Action pour le wizard de parrainage -->
+        <record id="action_parrainage_wizard" model="ir.actions.act_window">
+            <field name="name">Saisir un code de parrainage</field>
+            <field name="res_model">parrainage.wizard</field>
+            <field name="view_mode">form</field>
+            <field name="target">new</field>
+        </record>
+    </data>
+</odoo> 
