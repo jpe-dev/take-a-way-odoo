@@ -1,13 +1,21 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <data noupdate="1">
+        <!-- Activer la devise CHF -->
         <record id="base.CHF" model="res.currency">
             <field name="active" eval="True"/>
         </record>
         
+        <!-- Configurer la société principale pour la Suisse -->
         <record id="base.main_company" model="res.company">
             <field name="currency_id" ref="base.CHF"/>
             <field name="country_id" ref="base.ch"/>
+            <field name="name">Take-A-Way</field>
+            <field name="street">Rue de la Gare 1</field>
+            <field name="city">Lausanne</field>
+            <field name="zip">1000</field>
+            <field name="phone">+41 21 123 45 67</field>
+            <field name="email">contact@takeaway.ch</field>
         </record>
     </data>
 </odoo>

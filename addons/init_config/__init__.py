@@ -10,7 +10,17 @@ def post_init_hook(cr, registry):
         if lang:
             env['res.users'].browse(SUPERUSER_ID).write({'lang': lang.code})
 
-        # Définir la devise par défaut sur CHF
-        currency = env['res.currency'].search([('name', '=', 'CHF')], limit=1)
-        if currency:
-            env['res.company'].browse(1).write({'currency_id': currency.id})
+        # Configurer la société principale pour forcer la localisation fiscale suisse
+        company = env['res.company'].browse(1)
+        company.write({
+            'country_id': env.ref('base.ch').id,  # Suisse
+            'currency_id': env.ref('base.CHF').id,  # Franc suisse
+        })
+
+        # Forcer l'installation du plan comptable suisse via la localisation
+        # Odoo va automatiquement installer le bon plan comptable, taxes, etc.
+        # quand le pays est défini sur la Suisse
+        if env['ir.module.module'].search([('name', '=', 'account')]).state == 'installed':
+            # Déclencher la configuration automatique de la localisation
+            # en forçant la mise à jour des paramètres de la société
+            company._onchange_country_id()
