@@ -290,7 +290,7 @@
                         type="action" 
                         class="btn-secondary"
                         invisible="is_company or parrain_id"
-                        context="{'default_partner_id': active_id}"/>
+                        context="{'default_partner_id': id}"/>
             </xpath>
             <xpath expr="//notebook" position="inside">
                 <page string="Parrainage" invisible="is_company">

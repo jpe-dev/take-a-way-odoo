@@ -6,8 +6,8 @@
             <field name="name">Mission Parrainage</field>
             <field name="description">Parrainez 2 nouveaux clients pour gagner des points de fidélité</field>
             <field name="point_recompense">100</field>
-            <field name="debut" eval="(DateTime.now() - timedelta(days=30)).strftime('%Y-%m-%d')"/>
-            <field name="fin" eval="(DateTime.now() + timedelta(days=60)).strftime('%Y-%m-%d')"/>
+            <field name="debut">2024-01-01</field>
+            <field name="fin">2024-12-31</field>
             <field name="cumulable">True</field>
         </record>
 
