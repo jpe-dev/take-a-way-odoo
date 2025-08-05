@@ -30,5 +30,10 @@
             <field name="code">CONSECUTIVE</field>
             <field name="libelle">Achats consécutifs sur une période</field>
         </record>
+
+        <record id="type_mission_achat_toutes_categories" model="take_a_way_loyalty.type_mission">
+            <field name="code">ACHAT_TOUTES_CATEGORIES</field>
+            <field name="libelle">Achat dans toutes les catégories du point de vente</field>
+        </record>
     </data>
 </odoo>

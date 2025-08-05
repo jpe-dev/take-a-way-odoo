@@ -9,17 +9,17 @@
             <list>
                 <field name="mission_id"/>
                 <field name="type_condition"/>
-                <field name="produits_ids" widget="many2many_tags"/>
-                <field name="categorieProduit_id"/>
-                <field name="quantite"/>
-                <field name="montant_minimum"/>
-                <field name="nombre_commandes"/>
-                <!-- Champs pour mission consécutive, sans attrs (Odoo 18) -->
-                <field name="type_periode"/>
-                <field name="nombre_periodes"/>
-                <field name="type_objectif"/>
-                <field name="commandes_par_periode"/>
-                <field name="montant_par_periode"/>
+                <field name="produits_ids" widget="many2many_tags" invisible="type_condition_code != 'ACHAT_PRODUIT'"/>
+                <field name="categories_ids" widget="many2many_tags" invisible="type_condition_code not in ['CATEGORIE_PRODUIT', 'ACHAT_TOUTES_CATEGORIES']"/>
+                <field name="quantite" invisible="type_condition_code not in ['ACHAT_PRODUIT', 'CATEGORIE_PRODUIT', 'PARRAINAGE', 'ACHATS_JOUR']"/>
+                <field name="montant_minimum" invisible="type_condition_code != 'TOTAL_COMMANDE'"/>
+                <field name="nombre_commandes" invisible="type_condition_code != 'NOMBRE_COMMANDE'"/>
+                <!-- Champs pour mission consécutive -->
+                <field name="type_periode" invisible="type_condition_code != 'CONSECUTIVE'"/>
+                <field name="nombre_periodes" invisible="type_condition_code != 'CONSECUTIVE'"/>
+                <field name="type_objectif" invisible="type_condition_code != 'CONSECUTIVE'"/>
+                <field name="commandes_par_periode" invisible="type_condition_code != 'CONSECUTIVE'"/>
+                <field name="montant_par_periode" invisible="type_condition_code != 'CONSECUTIVE'"/>
             </list>
         </field>
     </record>
@@ -94,68 +94,98 @@
                     <group>
                         <field name="mission_id"/>
                         <field name="type_condition" options="{'no_create': True, 'no_open': True}"/>
+                        
+                        <!-- Champs pour ACHAT_PRODUIT -->
                         <field name="produits_ids"
                                widget="many2many_tags"
-                               readonly="type_condition.code != 'ACHAT_PRODUIT'"
-                               required="type_condition.code == 'ACHAT_PRODUIT'"
-                               invisible="type_condition.code != 'ACHAT_PRODUIT'"/>
+                               invisible="type_condition_code != 'ACHAT_PRODUIT'"
+                               required="type_condition_code == 'ACHAT_PRODUIT'"
+                               options="{'no_create': True, 'no_open': True}"/>
                         <field name="quantites_produits"
-                               readonly="type_condition.code != 'ACHAT_PRODUIT' or not produits_ids"
-                               invisible="type_condition.code != 'ACHAT_PRODUIT' or not produits_ids">
+                               invisible="type_condition_code != 'ACHAT_PRODUIT' or not produits_ids"
+                               readonly="type_condition_code != 'ACHAT_PRODUIT' or not produits_ids">
                             <list editable="bottom">
                                 <field name="produit_id" readonly="1"/>
                                 <field name="quantite_requise"/>
                             </list>
                         </field>
+                        <field name="resume_quantites" 
+                               readonly="1" 
+                               invisible="type_condition_code != 'ACHAT_PRODUIT' or not produits_ids"/>
+                        
+                        <!-- Champs pour CATEGORIE_PRODUIT -->
                         <field name="categories_ids"
                                domain="[('id', 'in', parent.mission_id.pos_config_id.iface_available_categ_ids)]"
                                widget="many2many_tags"
-                               readonly="type_condition.code != 'CATEGORIE_PRODUIT'"
-                               required="type_condition.code == 'CATEGORIE_PRODUIT'"
-                               invisible="type_condition.code != 'CATEGORIE_PRODUIT'"/>
-                        <field name="quantite" 
-                               readonly="type_condition.code not in ['ACHAT_PRODUIT', 'CATEGORIE_PRODUIT', 'PARRAINAGE']"
-                               required="type_condition.code in ['ACHAT_PRODUIT', 'CATEGORIE_PRODUIT', 'PARRAINAGE']"
-                               invisible="type_condition.code not in ['ACHAT_PRODUIT', 'CATEGORIE_PRODUIT', 'PARRAINAGE']"/>
-                        <field name="montant_minimum" 
-                               readonly="type_condition.code != 'TOTAL_COMMANDE'"
-                               required="type_condition.code == 'TOTAL_COMMANDE'"
-                               invisible="type_condition.code != 'TOTAL_COMMANDE'"/>
-                        <field name="nombre_commandes" 
-                               readonly="type_condition.code != 'NOMBRE_COMMANDE'"
-                               required="type_condition.code == 'NOMBRE_COMMANDE'"
-                               invisible="type_condition.code != 'NOMBRE_COMMANDE'"/>
-                        <!-- Champs pour la mission consécutive -->
-                        <field name="type_periode" 
-                               readonly="type_condition.code != 'CONSECUTIVE'"
-                               required="type_condition.code == 'CONSECUTIVE'"
-                               invisible="type_condition.code != 'CONSECUTIVE'"/>
-                        <field name="nombre_periodes" 
-                               readonly="type_condition.code != 'CONSECUTIVE'"
-                               required="type_condition.code == 'CONSECUTIVE'"
-                               invisible="type_condition.code != 'CONSECUTIVE'"/>
-                        <field name="type_objectif" 
-                               readonly="type_condition.code != 'CONSECUTIVE'"
-                               required="type_condition.code == 'CONSECUTIVE'"
-                               invisible="type_condition.code != 'CONSECUTIVE'"/>
-                        <field name="commandes_par_periode" 
-                               readonly="type_condition.code != 'CONSECUTIVE' or type_objectif == 'montant'"
-                               required="type_condition.code == 'CONSECUTIVE' and type_objectif == 'commandes'"
-                               invisible="type_condition.code != 'CONSECUTIVE' or type_objectif == 'montant'"/>
-                        <field name="montant_par_periode" 
-                               readonly="type_condition.code != 'CONSECUTIVE' or type_objectif == 'commandes'"
-                               required="type_condition.code == 'CONSECUTIVE' and type_objectif == 'montant'"
-                               invisible="type_condition.code != 'CONSECUTIVE' or type_objectif == 'commandes'"/>
+                               invisible="type_condition_code != 'CATEGORIE_PRODUIT'"
+                               required="type_condition_code == 'CATEGORIE_PRODUIT'"
+                               options="{'no_create': True, 'no_open': True}"/>
+                        
+                        <!-- Champs pour ACHAT_TOUTES_CATEGORIES -->
                         <field name="categories_ids"
                                domain="[('id', 'in', parent.mission_id.pos_config_id.iface_available_categ_ids)]"
-                               options="{'no_create': True, 'no_open': True, 'model': 'pos.category'}"
-                               widget="many2many_tags"/>
+                               widget="many2many_tags"
+                               invisible="type_condition_code != 'ACHAT_TOUTES_CATEGORIES'"
+                               readonly="type_condition_code == 'ACHAT_TOUTES_CATEGORIES'"
+                               options="{'no_create': True, 'no_open': True}"/>
                         <button name="action_reinitialiser_categories" 
                                 string="Réinitialiser les catégories" 
                                 type="object" 
                                 class="btn-secondary"
-                                invisible="type_condition.code != 'ACHAT_TOUTES_CATEGORIES'"
+                                invisible="type_condition_code != 'ACHAT_TOUTES_CATEGORIES'"
                                 help="Réinitialise les catégories pour permettre une nouvelle sélection automatique"/>
+                        
+                        <!-- Champs pour PARRAINAGE -->
+                        <field name="quantite" 
+                               invisible="type_condition_code != 'PARRAINAGE'"
+                               required="type_condition_code == 'PARRAINAGE'"
+                               help="Nombre de filleuls requis pour compléter la mission"/>
+                        
+                        <!-- Champs pour TOTAL_COMMANDE -->
+                        <field name="montant_minimum" 
+                               invisible="type_condition_code != 'TOTAL_COMMANDE'"
+                               required="type_condition_code == 'TOTAL_COMMANDE'"
+                               help="Montant minimum requis pour la commande"/>
+                        
+                        <!-- Champs pour NOMBRE_COMMANDE -->
+                        <field name="nombre_commandes" 
+                               invisible="type_condition_code != 'NOMBRE_COMMANDE'"
+                               required="type_condition_code == 'NOMBRE_COMMANDE'"
+                               help="Nombre de commandes requis"/>
+                        
+                        <!-- Champs pour ACHATS_JOUR -->
+                        <field name="quantite" 
+                               invisible="type_condition_code != 'ACHATS_JOUR'"
+                               readonly="type_condition_code == 'ACHATS_JOUR'"
+                               help="Nombre d'achats requis dans la même journée (fixé à 2)"/>
+                        
+                        <!-- Champs pour CONSECUTIVE -->
+                        <field name="type_periode" 
+                               invisible="type_condition_code != 'CONSECUTIVE'"
+                               required="type_condition_code == 'CONSECUTIVE'"
+                               help="Type de période pour les achats consécutifs"/>
+                        <field name="nombre_periodes" 
+                               invisible="type_condition_code != 'CONSECUTIVE'"
+                               required="type_condition_code == 'CONSECUTIVE'"
+                               help="Nombre de périodes consécutives requises"/>
+                        <field name="type_objectif" 
+                               invisible="type_condition_code != 'CONSECUTIVE'"
+                               required="type_condition_code == 'CONSECUTIVE'"
+                               help="Type d'objectif à atteindre par période"/>
+                        <field name="commandes_par_periode" 
+                               invisible="type_condition_code != 'CONSECUTIVE' or type_objectif == 'montant'"
+                               required="type_condition_code == 'CONSECUTIVE' and type_objectif == 'commandes'"
+                               help="Nombre de commandes requis par période"/>
+                        <field name="montant_par_periode" 
+                               invisible="type_condition_code != 'CONSECUTIVE' or type_objectif == 'commandes'"
+                               required="type_condition_code == 'CONSECUTIVE' and type_objectif == 'montant'"
+                               help="Montant minimum requis par période"/>
+                        
+                        <!-- Champ quantite générique pour certains types -->
+                        <field name="quantite" 
+                               invisible="type_condition_code not in ['ACHAT_PRODUIT', 'CATEGORIE_PRODUIT']"
+                               required="type_condition_code in ['ACHAT_PRODUIT', 'CATEGORIE_PRODUIT']"
+                               help="Quantité requise pour compléter la mission"/>
                     </group>
                 </sheet>
             </form>
@@ -200,18 +230,18 @@
                             <field name="condition_ids">
                                 <list editable="bottom">
                                     <field name="type_condition"/>
-                                    <field name="produits_ids" widget="many2many_tags"/>
-                                    <field name="categories_ids" widget="many2many_tags"/>
-                                    <field name="quantite"/>
-                                    <field name="resume_quantites" readonly="1" invisible="type_condition.code != 'ACHAT_PRODUIT' or not produits_ids"/>
-                                    <field name="montant_minimum"/>
-                                    <field name="nombre_commandes"/>
-                                    <!-- Champs pour mission consécutive, tous éditables -->
-                                    <field name="type_periode"/>
-                                    <field name="nombre_periodes"/>
-                                    <field name="type_objectif"/>
-                                    <field name="commandes_par_periode"/>
-                                    <field name="montant_par_periode"/>
+                                    <field name="produits_ids" widget="many2many_tags" invisible="type_condition_code != 'ACHAT_PRODUIT'"/>
+                                    <field name="categories_ids" widget="many2many_tags" invisible="type_condition_code not in ['CATEGORIE_PRODUIT', 'ACHAT_TOUTES_CATEGORIES']"/>
+                                    <field name="quantite" invisible="type_condition_code not in ['ACHAT_PRODUIT', 'CATEGORIE_PRODUIT', 'PARRAINAGE', 'ACHATS_JOUR']"/>
+                                    <field name="resume_quantites" readonly="1" invisible="type_condition_code != 'ACHAT_PRODUIT' or not produits_ids"/>
+                                    <field name="montant_minimum" invisible="type_condition_code != 'TOTAL_COMMANDE'"/>
+                                    <field name="nombre_commandes" invisible="type_condition_code != 'NOMBRE_COMMANDE'"/>
+                                    <!-- Champs pour mission consécutive -->
+                                    <field name="type_periode" invisible="type_condition_code != 'CONSECUTIVE'"/>
+                                    <field name="nombre_periodes" invisible="type_condition_code != 'CONSECUTIVE'"/>
+                                    <field name="type_objectif" invisible="type_condition_code != 'CONSECUTIVE'"/>
+                                    <field name="commandes_par_periode" invisible="type_condition_code != 'CONSECUTIVE'"/>
+                                    <field name="montant_par_periode" invisible="type_condition_code != 'CONSECUTIVE'"/>
                                     <field name="type_condition_code" invisible="1"/>
                                 </list>
                             </field>

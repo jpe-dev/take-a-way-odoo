@@ -414,6 +414,9 @@ class ConditionMission(models.Model):
                     if record.mission_id.pos_config_id:
                         categories = record.mission_id.pos_config_id.iface_available_categ_ids
                         record.categories_ids = [(6, 0, categories.ids)]
+                elif record.type_condition.code == 'ACHATS_JOUR':
+                    # Pour ACHATS_JOUR, fixer la quantité à 2 (2 achats dans la même journée)
+                    record.quantite = 2
                 elif record.type_condition.code != 'TOTAL_COMMANDE':
                     record.montant_minimum = 0.0
                 elif record.type_condition.code != 'NOMBRE_COMMANDE':

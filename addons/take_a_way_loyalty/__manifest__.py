@@ -16,7 +16,7 @@
     'version': '1.0.1',
 
     # any module necessary for this one to work correctly
-    'depends': ['base', 'point_of_sale', 'product'],
+    'depends': ['base', 'point_of_sale', 'product', 'web'],
 
     # always loaded
     'data': [
