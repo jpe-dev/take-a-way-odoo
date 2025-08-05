@@ -89,7 +89,13 @@ class Mission(models.Model):
         
         return True
 
-
+    def clear_missions_cache(self):
+        """Nettoie le cache des missions vérifiées"""
+        if hasattr(self.env, '_missions_cache'):
+            cache_size = len(self.env._missions_cache)
+            self.env._missions_cache.clear()
+            _logger.info("[FIDELITE] Cache des missions nettoyé (%s entrées supprimées)", cache_size)
+        return True
 
     def test_missions_manual(self):
         """Test manuel des missions pour déboguer"""
@@ -115,6 +121,322 @@ class Mission(models.Model):
                 'title': 'Test des missions',
                 'message': f'Test terminé. Vérifiez les logs pour plus de détails.',
                 'type': 'info',
+            }
+        }
+
+    def test_cumulable_missions(self):
+        """Test spécifique pour les missions cumulables"""
+        _logger.info("=== Test des missions cumulables ===")
+        
+        # Vérifier les missions existantes
+        missions = self.env['take_a_way_loyalty.mission'].search([])
+        _logger.info(f"Nombre de missions trouvées: {len(missions)}")
+        
+        cumulable_missions = []
+        non_cumulable_missions = []
+        
+        for mission in missions:
+            if mission.cumulable:
+                cumulable_missions.append(mission)
+            else:
+                non_cumulable_missions.append(mission)
+            
+            _logger.info(f"Mission: {mission.name}")
+            _logger.info(f"  - Cumulable: {mission.cumulable}")
+            _logger.info(f"  - Points de récompense: {mission.point_recompense}")
+            _logger.info(f"  - Participants: {len(mission.mission_user_ids)}")
+        
+        message = f"""
+        Résumé des missions:
+        - Missions cumulables: {len(cumulable_missions)}
+        - Missions non-cumulables: {len(non_cumulable_missions)}
+        - Total: {len(missions)}
+        
+        Missions cumulables: {[m.name for m in cumulable_missions]}
+        Missions non-cumulables: {[m.name for m in non_cumulable_missions]}
+        """
+        
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Test des missions cumulables',
+                'message': message,
+                'type': 'info',
+            }
+        }
+
+    def test_points_attribution(self):
+        """Test spécifique pour vérifier l'attribution des points"""
+        _logger.info("=== Test de l'attribution des points ===")
+        
+        # Vérifier tous les utilisateurs et leurs points
+        points_records = self.env['take_a_way_loyalty.points_utilisateur'].search([])
+        _logger.info(f"Nombre d'utilisateurs avec des points: {len(points_records)}")
+        
+        total_points = 0
+        details = []
+        
+        for points_record in points_records:
+            _logger.info(f"Utilisateur: {points_record.utilisateur_id.name}")
+            _logger.info(f"  - Points totaux: {points_record.points_total}")
+            total_points += points_record.points_total
+            details.append(f"{points_record.utilisateur_id.name}: {points_record.points_total} points")
+        
+        # Vérifier les missions et leurs points de récompense
+        missions = self.env['take_a_way_loyalty.mission'].search([])
+        _logger.info(f"Nombre de missions: {len(missions)}")
+        
+        mission_details = []
+        for mission in missions:
+            _logger.info(f"Mission: {mission.name}")
+            _logger.info(f"  - Points de récompense: {mission.point_recompense}")
+            _logger.info(f"  - Cumulable: {mission.cumulable}")
+            _logger.info(f"  - Participants: {len(mission.mission_user_ids)}")
+            mission_details.append(f"{mission.name}: {mission.point_recompense} points (cumulable: {mission.cumulable})")
+        
+        message = f"""
+        Résumé des points:
+        - Total des points attribués: {total_points}
+        - Nombre d'utilisateurs: {len(points_records)}
+        
+        Détails par utilisateur:
+        {chr(10).join(details)}
+        
+        Détails des missions:
+        {chr(10).join(mission_details)}
+        """
+        
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Test de l\'attribution des points',
+                'message': message,
+                'type': 'info',
+            }
+        }
+
+    def correct_points_attribution(self):
+        """Corrige l'attribution des points de fidélité"""
+        _logger.info("=== Correction de l'attribution des points ===")
+        
+        # 1. Analyser les points actuels
+        points_records = self.env['take_a_way_loyalty.points_utilisateur'].search([])
+        _logger.info(f"Nombre d'utilisateurs avec des points: {len(points_records)}")
+        
+        corrections = []
+        
+        for points_record in points_records:
+            _logger.info(f"Utilisateur: {points_record.utilisateur_id.name}")
+            _logger.info(f"  - Points actuels: {points_record.points_total}")
+            
+            # 2. Calculer les points corrects basés sur les missions complétées
+            missions_completed = self.env['take_a_way_loyalty.mission_user'].search([
+                ('utilisateur_id', '=', points_record.utilisateur_id.id),
+                ('etat', '=', 'termine')
+            ])
+            
+            points_corrects = 0
+            for mission_user in missions_completed:
+                points_corrects += mission_user.mission_id.point_recompense
+                _logger.info(f"    Mission terminée: {mission_user.mission_id.name} (+{mission_user.mission_id.point_recompense} points)")
+            
+            # 3. Vérifier s'il y a une différence
+            if points_record.points_total != points_corrects:
+                difference = points_corrects - points_record.points_total
+                _logger.warning(f"  - Différence détectée: {difference} points")
+                _logger.warning(f"  - Points actuels: {points_record.points_total}")
+                _logger.warning(f"  - Points corrects: {points_corrects}")
+                
+                corrections.append({
+                    'utilisateur': points_record.utilisateur_id.name,
+                    'points_actuels': points_record.points_total,
+                    'points_corrects': points_corrects,
+                    'difference': difference
+                })
+                
+                # 4. Corriger les points
+                points_record.points_total = points_corrects
+                _logger.info(f"  - Points corrigés: {points_record.points_total}")
+            else:
+                _logger.info(f"  - Points corrects: {points_record.points_total}")
+        
+        # 5. Résumé des corrections
+        if corrections:
+            _logger.info("=== Résumé des corrections ===")
+            for correction in corrections:
+                _logger.info(f"Utilisateur: {correction['utilisateur']}")
+                _logger.info(f"  - Ancien total: {correction['points_actuels']}")
+                _logger.info(f"  - Nouveau total: {correction['points_corrects']}")
+                _logger.info(f"  - Différence: {correction['difference']}")
+        else:
+            _logger.info("Aucune correction nécessaire")
+        
+        message = f"""
+        Correction des points terminée:
+        - Utilisateurs vérifiés: {len(points_records)}
+        - Corrections effectuées: {len(corrections)}
+        
+        Détails des corrections:
+        {chr(10).join([f"- {c['utilisateur']}: {c['points_actuels']} → {c['points_corrects']} ({c['difference']:+d})" for c in corrections]) if corrections else "Aucune correction nécessaire"}
+        """
+        
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Correction des points',
+                'message': message,
+                'type': 'info',
+            }
+        }
+
+    def test_mission_completion_safety(self):
+        """Test de sécurité pour vérifier que _check_mission_completion fonctionne sans erreur"""
+        _logger.info("=== Test de sécurité pour _check_mission_completion ===")
+        
+        # Récupérer toutes les missions en cours
+        missions_users = self.env['take_a_way_loyalty.mission_user'].search([
+            ('etat', '=', 'en_cours')
+        ])
+        
+        _logger.info(f"Nombre de missions en cours: {len(missions_users)}")
+        
+        test_results = []
+        
+        for mission_user in missions_users:
+            try:
+                _logger.info(f"Test de la mission: {mission_user.mission_id.name}")
+                _logger.info(f"  - Utilisateur: {mission_user.utilisateur_id.name}")
+                _logger.info(f"  - État actuel: {mission_user.etat}")
+                _logger.info(f"  - Progression: {mission_user.progression}")
+                
+                # Appeler _check_mission_completion pour tester
+                mission_user._check_mission_completion(mission_user)
+                
+                _logger.info(f"  - État après test: {mission_user.etat}")
+                _logger.info(f"  - Test réussi ✅")
+                
+                test_results.append({
+                    'mission': mission_user.mission_id.name,
+                    'utilisateur': mission_user.utilisateur_id.name,
+                    'etat_avant': 'en_cours',
+                    'etat_apres': mission_user.etat,
+                    'success': True
+                })
+                
+            except Exception as e:
+                _logger.error(f"  - Erreur lors du test: {str(e)}")
+                test_results.append({
+                    'mission': mission_user.mission_id.name,
+                    'utilisateur': mission_user.utilisateur_id.name,
+                    'etat_avant': 'en_cours',
+                    'etat_apres': 'erreur',
+                    'success': False,
+                    'error': str(e)
+                })
+        
+        # Résumé des tests
+        successful_tests = [r for r in test_results if r['success']]
+        failed_tests = [r for r in test_results if not r['success']]
+        
+        message = f"""
+        Test de sécurité terminé:
+        - Tests réussis: {len(successful_tests)}/{len(test_results)}
+        - Tests échoués: {len(failed_tests)}
+        
+        Détails des tests réussis:
+        {chr(10).join([f"- {r['mission']} ({r['utilisateur']}): {r['etat_avant']} → {r['etat_apres']}" for r in successful_tests]) if successful_tests else "Aucun test réussi"}
+        
+        Détails des erreurs:
+        {chr(10).join([f"- {r['mission']} ({r['utilisateur']}): {r.get('error', 'Erreur inconnue')}" for r in failed_tests]) if failed_tests else "Aucune erreur"}
+        """
+        
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Test de sécurité des missions',
+                'message': message,
+                'type': 'info' if not failed_tests else 'warning',
+            }
+        }
+
+    def test_multiple_calls_protection(self):
+        """Test de protection contre les appels multiples"""
+        _logger.info("=== Test de protection contre les appels multiples ===")
+        
+        # Récupérer les commandes POS récentes
+        recent_orders = self.env['pos.order'].search([
+            ('state', 'in', ['paid', 'done', 'invoiced']),
+            ('create_date', '>=', fields.Date.today())
+        ], limit=5)
+        
+        _logger.info(f"Nombre de commandes récentes trouvées: {len(recent_orders)}")
+        
+        test_results = []
+        
+        for order in recent_orders:
+            try:
+                _logger.info(f"Test de la commande: {order.name} (ID: {order.id})")
+                _logger.info(f"  - Statut: {order.state}")
+                _logger.info(f"  - Partenaire: {order.partner_id.name if order.partner_id else 'Aucun'}")
+                
+                # Premier appel
+                _logger.info("  - Premier appel à _check_missions...")
+                order._check_missions(order)
+                
+                # Deuxième appel (devrait être ignoré)
+                _logger.info("  - Deuxième appel à _check_missions...")
+                order._check_missions(order)
+                
+                # Troisième appel (devrait être ignoré)
+                _logger.info("  - Troisième appel à _check_missions...")
+                order._check_missions(order)
+                
+                _logger.info("  - Test réussi ✅")
+                
+                test_results.append({
+                    'commande': order.name,
+                    'id': order.id,
+                    'statut': order.state,
+                    'success': True
+                })
+                
+            except Exception as e:
+                _logger.error(f"  - Erreur lors du test: {str(e)}")
+                test_results.append({
+                    'commande': order.name,
+                    'id': order.id,
+                    'statut': order.state,
+                    'success': False,
+                    'error': str(e)
+                })
+        
+        # Résumé des tests
+        successful_tests = [r for r in test_results if r['success']]
+        failed_tests = [r for r in test_results if not r['success']]
+        
+        message = f"""
+        Test de protection terminé:
+        - Tests réussis: {len(successful_tests)}/{len(test_results)}
+        - Tests échoués: {len(failed_tests)}
+        
+        Détails des tests réussis:
+        {chr(10).join([f"- {r['commande']} (ID: {r['id']}): {r['statut']}" for r in successful_tests]) if successful_tests else "Aucun test réussi"}
+        
+        Détails des erreurs:
+        {chr(10).join([f"- {r['commande']} (ID: {r['id']}): {r.get('error', 'Erreur inconnue')}" for r in failed_tests]) if failed_tests else "Aucune erreur"}
+        """
+        
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Test de protection contre les appels multiples',
+                'message': message,
+                'type': 'info' if not failed_tests else 'warning',
             }
         }
 
@@ -201,10 +523,14 @@ class MissionUser(models.Model):
 
     def _check_mission_completion(self, mission_user):
         _logger.warning("[FIDELITE][DEBUG] _check_mission_completion appelée pour mission_user %s", mission_user.id)
-        if not mission_user.mission_id.condition_ids:
-            _logger.warning("La mission %s n'a pas de conditions", mission_user.mission_id.name)
+        
+        # Vérifier si la mission est déjà terminée pour éviter les appels multiples
+        if mission_user.etat == 'termine':
+            _logger.warning("[FIDELITE][DEBUG] Mission déjà terminée, ignorée")
             return
-
+        
+        # Vérifier si les conditions sont déjà remplies pour éviter les appels multiples
+        # en recalculant rapidement si les conditions sont remplies
         conditions_remplies = True
         for condition in mission_user.mission_id.condition_ids:
             if condition.type_condition.code == 'ACHAT_PRODUIT':
@@ -280,8 +606,20 @@ class MissionUser(models.Model):
                     conditions_remplies = False
                     break
 
-        if conditions_remplies and mission_user.etat == 'en_cours':
-            mission_user.etat = 'termine'
+        # Vérifier à nouveau l'état avant de procéder (protection contre les appels multiples)
+        if not conditions_remplies or mission_user.etat != 'en_cours':
+            _logger.warning("[FIDELITE][DEBUG] Conditions non remplies ou mission déjà traitée, ignorée")
+            return
+
+        if not mission_user.mission_id.condition_ids:
+            _logger.warning("La mission %s n'a pas de conditions", mission_user.mission_id.name)
+            return
+
+        # Marquer temporairement comme terminé pour éviter les appels multiples
+        mission_user.etat = 'termine'
+        
+        try:
+            # Attribuer les points de récompense
             points_record = self.env['take_a_way_loyalty.points_utilisateur'].search([
                 ('utilisateur_id', '=', mission_user.utilisateur_id.id)
             ], limit=1)
@@ -290,7 +628,54 @@ class MissionUser(models.Model):
                     'utilisateur_id': mission_user.utilisateur_id.id,
                     'points_total': 0
                 })
-            points_record.points_total += mission_user.mission_id.point_recompense
+            
+            # Log détaillé pour tracer l'attribution des points
+            points_avant = points_record.points_total
+            points_a_ajouter = mission_user.mission_id.point_recompense
+            points_record.points_total += points_a_ajouter
+            points_apres = points_record.points_total
+            
+            _logger.info("[FIDELITE] Attribution des points pour la mission '%s'", mission_user.mission_id.name)
+            _logger.info("[FIDELITE] Utilisateur: %s", mission_user.utilisateur_id.name)
+            _logger.info("[FIDELITE] Points avant: %s", points_avant)
+            _logger.info("[FIDELITE] Points à ajouter: %s", points_a_ajouter)
+            _logger.info("[FIDELITE] Points après: %s", points_apres)
+            _logger.info("[FIDELITE] Mission cumulable: %s", mission_user.mission_id.cumulable)
+            
+            # Gestion des missions cumulables vs non-cumulables
+            if mission_user.mission_id.cumulable:
+                _logger.info("[FIDELITE] Mission cumulable terminée - Réinitialisation pour permettre la répétition")
+                # Pour les missions cumulables, réinitialiser la progression pour permettre la répétition
+                mission_user._reset_mission_progression()
+            else:
+                _logger.info("[FIDELITE] Mission non-cumulable terminée - Passage à l'état terminé")
+                # Pour les missions non-cumulables, l'état est déjà 'termine'
+        except Exception as e:
+            # En cas d'erreur, remettre l'état en cours
+            mission_user.etat = 'en_cours'
+            _logger.error("[FIDELITE] Erreur lors de l'attribution des points: %s", str(e))
+            raise
+
+    def _reset_mission_progression(self):
+        """Réinitialise la progression d'une mission pour permettre sa répétition"""
+        self.ensure_one()
+        _logger.info("[FIDELITE] Réinitialisation de la progression pour la mission %s", self.mission_id.name)
+        
+        # Réinitialiser la progression générale
+        self.progression = 0
+        
+        # Réinitialiser les progressions par produit
+        for progression_produit in self.progression_par_produit:
+            progression_produit.quantite_actuelle = 0
+        
+        # Réinitialiser les progressions par période (pour les missions consécutives)
+        for progression_periode in self.progression_periode_ids:
+            progression_periode.unlink()
+        
+        # Garder l'état en cours pour permettre la répétition
+        self.etat = 'en_cours'
+        
+        _logger.info("[FIDELITE] Progression réinitialisée pour la mission %s", self.mission_id.name)
 
     def _set_default_values(self, vals):
         """Définit les valeurs par défaut pour la création."""
@@ -342,6 +727,55 @@ class MissionUser(models.Model):
         except Exception as e:
             _logger.error("Erreur lors de la création du participant: %s", str(e))
             return False
+
+    def action_reinitialiser_mission(self):
+        """Action pour réinitialiser manuellement une mission cumulable"""
+        self.ensure_one()
+        if not self.mission_id.cumulable:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Mission non cumulable',
+                    'message': 'Cette mission n\'est pas cumulable et ne peut pas être réinitialisée.',
+                    'type': 'warning',
+                }
+            }
+        
+        self._reset_mission_progression()
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Mission réinitialisée',
+                'message': f'La mission "{self.mission_id.name}" a été réinitialisée et peut être complétée à nouveau.',
+                'type': 'success',
+            }
+        }
+
+    def action_verifier_repetition(self):
+        """Vérifie si une mission peut être répétée"""
+        self.ensure_one()
+        if self.mission_id.cumulable:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Mission cumulable',
+                    'message': f'Cette mission peut être complétée plusieurs fois. État actuel: {self.etat}',
+                    'type': 'info',
+                }
+            }
+        else:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': 'Mission non cumulable',
+                    'message': f'Cette mission ne peut être complétée qu\'une seule fois. État actuel: {self.etat}',
+                    'type': 'info',
+                }
+            }
 
 class TypeMission(models.Model):
     _name = 'take_a_way_loyalty.type_mission'
@@ -496,117 +930,151 @@ class PosOrder(models.Model):
         self._check_missions()
 
     def write(self, vals):
-        result = super(PosOrder, self).write(vals)
+        """Override pour vérifier les missions quand une commande est payée"""
+        orders = super(PosOrder, self).write(vals)
         
-        # Vérifier différents statuts possibles pour les commandes POS payées
-        if vals.get('state') in ['paid', 'done', 'invoiced']:
-            for order in self:
-                _logger.warning("[FIDELITE][DEBUG] Commande POS %s passée au statut '%s', appel de _check_missions", order.id, vals.get('state'))
+        # Vérifier si le statut a changé vers un statut de paiement
+        if 'state' in vals and vals['state'] in ['paid', 'done', 'invoiced']:
             _logger.warning("[FIDELITE][DEBUG] Valeurs de write: %s", vals)
-            self._check_missions()
-        else:
             for order in self:
-                _logger.warning("[FIDELITE][DEBUG] Commande POS %s - statut: %s (pas un statut de paiement)", order.id, vals.get('state'))
-        return result
+                _logger.warning("[FIDELITE][DEBUG] _check_missions appelée pour order %s", order.id)
+                order._check_missions(order)
+        
+        return orders
+
+    def reset_missions_check_flag(self):
+        """Réinitialise le flag de vérification des missions pour une commande"""
+        for order in self:
+            cache_key = f"missions_checked_{order.id}"
+            if hasattr(self.env, '_missions_cache') and cache_key in self.env._missions_cache:
+                del self.env._missions_cache[cache_key]
+                _logger.info("[FIDELITE] Flag de vérification des missions réinitialisé pour la commande %s", order.id)
+        return True
 
     def action_pos_order_paid(self):
-        """Méthode appelée quand une commande POS est payée"""
-        for order in self:
-            _logger.warning("[FIDELITE][DEBUG] action_pos_order_paid appelée pour la commande %s", order.id)
+        """Override pour vérifier les missions quand une commande est marquée comme payée"""
+        _logger.warning("[FIDELITE][DEBUG] action_pos_order_paid appelée pour la commande %s", self.id)
         result = super(PosOrder, self).action_pos_order_paid()
-        self._check_missions()
+        
+        # Vérifier les missions après le paiement
+        for order in self:
+            _logger.warning("[FIDELITE][DEBUG] Commande POS %s passée au statut 'paid', appel de _check_missions", order.id)
+            order._check_missions(order)
+        
         return result
 
     def action_pos_order_invoice(self):
-        """Méthode appelée quand une facture est créée pour une commande POS"""
-        for order in self:
-            _logger.warning("[FIDELITE][DEBUG] action_pos_order_invoice appelée pour la commande %s", order.id)
+        """Override pour vérifier les missions quand une commande est facturée"""
+        _logger.warning("[FIDELITE][DEBUG] action_pos_order_invoice appelée pour la commande %s", self.id)
         result = super(PosOrder, self).action_pos_order_invoice()
-        self._check_missions()
+        
+        # Vérifier les missions après la facturation
+        for order in self:
+            _logger.warning("[FIDELITE][DEBUG] Commande POS %s passée au statut 'invoiced', appel de _check_missions", order.id)
+            order._check_missions(order)
+        
         return result
 
     @api.model_create_multi
     def create(self, vals_list):
-        """Surcharge de la méthode create pour vérifier les commandes POS créées"""
+        """Override pour vérifier les missions à la création d'une commande POS"""
         orders = super(PosOrder, self).create(vals_list)
+        
         for order in orders:
             _logger.warning("[FIDELITE][DEBUG] Commande POS créée: %s avec statut: %s", order.id, order.state)
+            
+            # Vérifier les missions seulement si la commande est déjà payée
             if order.state in ['paid', 'done', 'invoiced']:
                 _logger.warning("[FIDELITE][DEBUG] Commande POS %s créée avec statut de paiement, appel de _check_missions", order.id)
-                order._check_missions()
+                order._check_missions(order)
+        
         return orders
 
-    def _check_missions(self):
-        for order in self:
-            _logger.warning("[FIDELITE][DEBUG] _check_missions appelée pour order %s", order.id)
-            _logger.warning("[FIDELITE][DEBUG] Partner de la commande: %s (ID: %s)", order.partner_id.name, order.partner_id.id)
-            
-            # Vérifier toutes les missions existantes
-            all_missions = self.env['take_a_way_loyalty.mission'].search([])
-            _logger.warning("[FIDELITE][DEBUG] Toutes les missions existantes: %s", len(all_missions))
-            for mission in all_missions:
-                _logger.warning("[FIDELITE][DEBUG] Mission: %s (début: %s, fin: %s)", mission.name, mission.debut, mission.fin)
-            
-            missions = self.env['take_a_way_loyalty.mission'].search([
-                ('debut', '<=', fields.Date.today()),
-                ('fin', '>=', fields.Date.today()),
-            ])
-            
-            _logger.warning("[FIDELITE][DEBUG] Missions trouvées dans la période: %s", len(missions))
+    def _check_missions(self, order):
+        """Vérifie les missions pour une commande POS"""
+        _logger.warning("[FIDELITE][DEBUG] _check_missions appelée pour order %s", order.id)
+        
+        # Protection contre les appels multiples pour la même commande
+        # Utiliser un cache global au lieu de modifier l'objet
+        cache_key = f"missions_checked_{order.id}"
+        if hasattr(self.env, '_missions_cache') and cache_key in self.env._missions_cache:
+            _logger.warning("[FIDELITE][DEBUG] Missions déjà vérifiées pour cette commande, ignorée")
+            return
+        
+        # Initialiser le cache si nécessaire
+        if not hasattr(self.env, '_missions_cache'):
+            self.env._missions_cache = {}
+        
+        # Marquer la commande comme vérifiée
+        self.env._missions_cache[cache_key] = True
+        
+        if not order.partner_id:
+            _logger.warning("[FIDELITE][DEBUG] Pas de partenaire associé à la commande")
+            return
 
-            # Liste des utilisateurs à vérifier (le partenaire de la commande + ses parrains)
-            users_to_check = []
-            
-            # Vérifier si la commande a un partenaire
-            if order.partner_id:
-                users_to_check.append(order.partner_id)
-                
-                # Pour les missions de parrainage, ajouter aussi les parrains du partenaire
-                if order.partner_id.parrain_id:
-                    users_to_check.append(order.partner_id.parrain_id)
-                    _logger.warning("[FIDELITE][DEBUG] Ajout du parrain %s (ID: %s) à la vérification", 
-                                   order.partner_id.parrain_id.name, order.partner_id.parrain_id.id)
-            else:
-                _logger.warning("[FIDELITE][DEBUG] Commande %s n'a pas de partenaire, impossible de vérifier les missions", order.id)
+        _logger.warning("[FIDELITE][DEBUG] Partner de la commande: %s (ID: %s)", order.partner_id.name, order.partner_id.id)
+
+        # Récupérer toutes les missions actives
+        missions = self.env['take_a_way_loyalty.mission'].search([])
+        _logger.warning("[FIDELITE][DEBUG] Toutes les missions existantes: %s", len(missions))
+
+        # Filtrer les missions dans la période actuelle
+        date_actuelle = fields.Date.today()
+        missions_periode = []
+        for mission in missions:
+            _logger.warning("[FIDELITE][DEBUG] Mission: %s (début: %s, fin: %s)", 
+                           mission.name, mission.debut, mission.fin)
+            if (not mission.debut or mission.debut <= date_actuelle) and \
+               (not mission.fin or mission.fin >= date_actuelle):
+                missions_periode.append(mission)
+
+        _logger.warning("[FIDELITE][DEBUG] Missions trouvées dans la période: %s", len(missions_periode))
+
+        if not missions_periode:
+            _logger.warning("[FIDELITE][DEBUG] Aucune mission active trouvée")
+            return
+
+        _logger.warning("[FIDELITE][DEBUG] Vérification des missions pour l'utilisateur: %s (ID: %s)", 
+                       order.partner_id.name, order.partner_id.id)
+
+        for mission in missions_periode:
+            _logger.warning("[FIDELITE][DEBUG] Vérification de la mission: %s", mission.name)
+
+            # Vérifier si l'utilisateur participe à cette mission
+            mission_user = self.env['take_a_way_loyalty.mission_user'].search([
+                ('mission_id', '=', mission.id),
+                ('utilisateur_id', '=', order.partner_id.id)
+            ], limit=1)
+
+            if not mission_user:
+                _logger.warning("[FIDELITE][DEBUG] L'utilisateur %s ne participe pas à la mission %s", 
+                               order.partner_id.name, mission.name)
                 continue
 
-            # Vérifier les missions pour chaque utilisateur
-            for user in users_to_check:
-                _logger.warning("[FIDELITE][DEBUG] Vérification des missions pour l'utilisateur: %s (ID: %s)", user.name, user.id)
-                
-                for mission in missions:
-                    _logger.warning("[FIDELITE][DEBUG] Vérification de la mission: %s", mission.name)
-                    
-                    mission_user = self.env['take_a_way_loyalty.mission_user'].search([
-                        ('mission_id', '=', mission.id),
-                        ('utilisateur_id', '=', user.id),
-                        ('etat', '=', 'en_cours')
-                    ], limit=1)
+            _logger.warning("[FIDELITE][DEBUG] Mission_user trouvé: %s, progression actuelle: %s", 
+                           mission_user.id, mission_user.progression)
 
-                    if not mission_user:
-                        _logger.warning("[FIDELITE][DEBUG] Aucun mission_user trouvé pour la mission %s et l'utilisateur %s (ID: %s)", 
-                                       mission.name, user.name, user.id)
-                        continue
+            # Vérifier chaque condition de la mission
+            for condition in mission.condition_ids:
+                _logger.warning("[FIDELITE][DEBUG] Vérification de la condition: %s", condition.type_condition.code)
 
-                    _logger.warning("[FIDELITE][DEBUG] Mission_user trouvé: %s, progression actuelle: %s", 
-                                   mission_user.id, mission_user.progression)
-
-                    for condition in mission.condition_ids:
-                        _logger.warning("[FIDELITE][DEBUG] Vérification de la condition: %s", condition.type_condition.code)
-                        if condition.type_condition.code == 'ACHAT_PRODUIT':
-                            self._check_product_condition(order, condition, mission_user)
-                        elif condition.type_condition.code == 'TOTAL_COMMANDE':
-                            self._check_total_condition(order, condition, mission_user)
-                        elif condition.type_condition.code == 'NOMBRE_COMMANDE':
-                            self._check_order_count_condition(order, condition, mission_user)
-                        elif condition.type_condition.code == 'CONSECUTIVE':
-                            self._check_consecutive_condition(order, condition, mission_user)
-                        elif condition.type_condition.code == 'ACHATS_JOUR':
-                            self._check_achats_jour_condition(order, condition, mission_user)
-                        elif condition.type_condition.code == 'CATEGORIE_PRODUIT':
-                            self._check_categorie_produit_condition(order, condition, mission_user)
-                        elif condition.type_condition.code == 'PARRAINAGE':
-                            self._check_parrainage_condition(order, condition, mission_user)
+                if condition.type_condition.code == 'ACHAT_PRODUIT':
+                    _logger.warning("[FIDELITE][DEBUG] _check_product_condition appelée")
+                    self._check_product_condition(order, condition, mission_user)
+                elif condition.type_condition.code == 'TOTAL_COMMANDE':
+                    self._check_total_condition(order, condition, mission_user)
+                elif condition.type_condition.code == 'NOMBRE_COMMANDE':
+                    self._check_order_count_condition(order, condition, mission_user)
+                elif condition.type_condition.code == 'CONSECUTIVE':
+                    self._check_consecutive_condition(order, condition, mission_user)
+                elif condition.type_condition.code == 'ACHATS_JOUR':
+                    self._check_achats_jour_condition(order, condition, mission_user)
+                elif condition.type_condition.code == 'CATEGORIE_PRODUIT':
+                    self._check_categorie_produit_condition(order, condition, mission_user)
+                elif condition.type_condition.code == 'ACHAT_TOUTES_CATEGORIES':
+                    self._check_categorie_produit_condition(order, condition, mission_user)
+                elif condition.type_condition.code == 'PARRAINAGE':
+                    self._check_parrainage_condition(order, condition, mission_user)
 
     def _check_product_condition(self, order, condition, mission_user):
         _logger.warning("[FIDELITE][DEBUG] _check_product_condition appelée")
@@ -770,14 +1238,9 @@ class PosOrder(models.Model):
                         break
 
             if toutes_periodes_atteintes and len(periodes_precedentes) == limit:
-                # La mission est complétée
-                mission_user.etat = 'termine'
-                # Ajouter les points de récompense
-                points_record = self.env['take_a_way_loyalty.points_utilisateur'].search([
-                    ('utilisateur_id', '=', mission_user.utilisateur_id.id)
-                ], limit=1)
-                if points_record:
-                    points_record.points_total += mission_user.mission_id.point_recompense
+                # La mission est complétée - utiliser _check_mission_completion pour centraliser l'attribution des points
+                _logger.info("[FIDELITE] CONSECUTIVE - Mission consécutive terminée pour l'utilisateur %s", mission_user.utilisateur_id.name)
+                self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
 
     def _check_achats_jour_condition(self, order, condition, mission_user):
         """Vérifie si l'utilisateur a fait 2 achats dans la même journée."""
