@@ -54,6 +54,23 @@
         </field>
     </record>
 
+    <!-- Vue list pour Mission -->
+    <record id="view_mission_list" model="ir.ui.view">
+        <field name="name">take_a_way_loyalty.mission.list</field>
+        <field name="model">take_a_way_loyalty.mission</field>
+        <field name="arch" type="xml">
+            <list string="Missions">
+                <field name="name"/>
+                <field name="description"/>
+                <field name="point_recompense"/>
+                <field name="debut"/>
+                <field name="fin"/>
+                <field name="cumulable" widget="boolean_toggle"/>
+                <field name="pos_config_id"/>
+            </list>
+        </field>
+    </record>
+
     <!-- Vue form pour QuantiteProduit -->
     <record id="view_quantite_produit_form" model="ir.ui.view">
         <field name="name">take_a_way_loyalty.quantite_produit.form</field>
@@ -214,6 +231,36 @@
                             type="object" 
                             class="btn-secondary"
                             help="Teste manuellement les missions pour déboguer"/>
+                    <button name="test_cumulable_missions" 
+                            string="Test Missions Cumulables" 
+                            type="object" 
+                            class="btn-secondary"
+                            help="Teste spécifiquement les missions cumulables"/>
+                    <button name="test_points_attribution" 
+                            string="Test Attribution Points" 
+                            type="object" 
+                            class="btn-secondary"
+                            help="Teste l'attribution des points de fidélité"/>
+                    <button name="correct_points_attribution" 
+                            string="Corriger Points" 
+                            type="object" 
+                            class="btn-warning"
+                            help="Corrige l'attribution des points de fidélité"/>
+                    <button name="test_mission_completion_safety" 
+                            string="Test Sécurité Missions" 
+                            type="object" 
+                            class="btn-info"
+                            help="Teste la sécurité de _check_mission_completion"/>
+                    <button name="test_multiple_calls_protection" 
+                            string="Test Protection Appels" 
+                            type="object" 
+                            class="btn-info"
+                            help="Teste la protection contre les appels multiples"/>
+                    <button name="clear_missions_cache" 
+                            string="Nettoyer Cache" 
+                            type="object" 
+                            class="btn-warning"
+                            help="Nettoie le cache des missions vérifiées"/>
                 </header>
                 <sheet>
                     <group>
@@ -268,6 +315,19 @@
         <field name="model">take_a_way_loyalty.mission_user</field>
         <field name="arch" type="xml">
             <form string="Mission User">
+                <header>
+                    <button name="action_reinitialiser_mission" 
+                            string="Réinitialiser Mission" 
+                            type="object" 
+                            class="oe_highlight"
+                            invisible="not mission_id.cumulable or etat != 'termine'"
+                            help="Réinitialiser cette mission cumulable pour la compléter à nouveau"/>
+                    <button name="action_verifier_repetition" 
+                            string="Vérifier Répétition" 
+                            type="object" 
+                            class="btn-secondary"
+                            help="Vérifier si cette mission peut être répétée"/>
+                </header>
                 <sheet>
                     <group>
                         <field name="utilisateur_id"/>
