@@ -16,7 +16,7 @@ services:
       - ./odoo.conf:/etc/odoo/odoo.conf
       - ./addons:/mnt/extra-addons
     command: >- 
-      bash -c "pip install qifparse --break-system-packages && odoo --db_host=db --db_port=5432 --db_user=odoo --db_password=4wc2-7uej-au4y --init base,stock,point_of_sale,purchase,mrp,sale_management,account,crm,base_accounting_kit,take_a_way_loyalty --without-demo=all --load-language fr_CH -d db-odoo-ta"
+      bash -c "pip install qifparse --break-system-packages && odoo --db_host=db --db_port=5432 --db_user=odoo --db_password=4wc2-7uej-au4y --init base,init_config,account,l10n_ch,stock,point_of_sale,purchase,mrp,sale_management,crm,base_account_budget,base_accounting_kit,take_a_way_loyalty --without-demo=all --load-language fr_CH -d db-odoo-ta"
     logging:
       driver: "json-file"
       options:
