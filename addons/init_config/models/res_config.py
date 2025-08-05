@@ -6,14 +6,16 @@ class ResConfigSettings(models.TransientModel):
     @api.model
     def get_values(self):
         res = super().get_values()
-        # Activer CHF
+        # S'assurer que CHF est activé
         self.env['res.currency'].search([('name', '=', 'CHF')]).write({'active': True})
-        # Configurer la société principale
-        company = self.env.company
-        chf_currency = self.env['res.currency'].search([('name', '=', 'CHF')], limit=1)
-        if chf_currency:
-            company.write({
-                'currency_id': chf_currency.id,
-                'country_id': self.env.ref('base.ch').id,
-            })
         return res
+
+    @api.model
+    def set_values(self):
+        super().set_values()
+        # Forcer la configuration suisse lors de la sauvegarde des paramètres
+        company = self.env.company
+        company.write({
+            'country_id': self.env.ref('base.ch').id,
+            'currency_id': self.env.ref('base.CHF').id,
+        })
