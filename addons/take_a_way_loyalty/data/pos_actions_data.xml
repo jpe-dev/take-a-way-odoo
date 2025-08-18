@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+  <data noupdate="1">
+    <!-- Ajouter les actions au menu Actions des commandes PoS -->
+    
+    <!-- Action pour définir l'heure prévue -->
+    <record id="action_pos_order_set_heure_prevue" model="ir.actions.server">
+        <field name="name">Définir heure prévue</field>
+        <field name="model_id" ref="point_of_sale.model_pos_order"/>
+        <field name="state">code</field>
+        <field name="code">
+            if records:
+                records.action_set_heure_prevue()
+        </field>
+        <field name="binding_model_id" ref="point_of_sale.model_pos_order"/>
+        <field name="binding_view_types">form</field>
+    </record>
+
+    <!-- Action rapide pour définir l'heure prévue dans 1 heure -->
+    <record id="action_pos_order_set_heure_prevue_rapide" model="ir.actions.server">
+        <field name="name">Heure prévue +1h</field>
+        <field name="model_id" ref="point_of_sale.model_pos_order"/>
+        <field name="state">code</field>
+        <field name="code">
+            if records:
+                records.action_set_heure_prevue_rapide()
+        </field>
+        <field name="binding_model_id" ref="point_of_sale.model_pos_order"/>
+        <field name="binding_view_types">form</field>
+    </record>
+
+    <!-- Action pour effacer l'heure prévue -->
+    <record id="action_pos_order_clear_heure_prevue" model="ir.actions.server">
+        <field name="name">Effacer heure prévue</field>
+        <field name="model_id" ref="point_of_sale.model_pos_order"/>
+        <field name="state">code</field>
+        <field name="code">
+            if records:
+                records.write({'heure_prevue': False})
+        </field>
+        <field name="binding_model_id" ref="point_of_sale.model_pos_order"/>
+        <field name="binding_view_types">form</field>
+    </record>
+
+  </data>
+</odoo> 

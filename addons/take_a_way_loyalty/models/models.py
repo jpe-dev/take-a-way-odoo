@@ -923,6 +923,9 @@ class ConditionMission(models.Model):
 class PosOrder(models.Model):
     _inherit = 'pos.order'
 
+    # Champ pour l'heure prévue de la commande
+    heure_prevue = fields.Datetime(string='Heure prévue', help='Heure prévue pour la livraison ou le retrait de la commande')
+
     def _check_missions_manual(self):
         """Méthode manuelle pour déclencher la vérification des missions"""
         for order in self:
@@ -1327,6 +1330,117 @@ class PosOrder(models.Model):
         if filleuls_actifs >= (condition.quantite or 1):
             _logger.info("[FIDELITE] PARRAINAGE - Condition remplie pour l'utilisateur %s", mission_user.utilisateur_id.name)
             self.env['take_a_way_loyalty.mission_user']._check_mission_completion(mission_user)
+
+    def action_set_heure_prevue(self):
+        """Action pour définir l'heure prévue de la commande"""
+        self.ensure_one()
+        
+        # Créer un wizard pour définir l'heure prévue
+        return {
+            'type': 'ir.actions.act_window',
+            'res_model': 'heure.prevue.wizard',
+            'view_mode': 'form',
+            'target': 'new',
+            'context': {
+                'default_pos_order_id': self.id,
+                'default_heure_prevue': self.heure_prevue or fields.Datetime.now(),
+            }
+        }
+
+    def action_set_heure_prevue_rapide(self):
+        """Action rapide pour définir l'heure prévue (dans 1 heure par défaut)"""
+        self.ensure_one()
+        
+        # Définir l'heure prévue dans 1 heure par défaut
+        heure_prevue = fields.Datetime.now() + timedelta(hours=1)
+        self.write({'heure_prevue': heure_prevue})
+        
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Heure prévue définie',
+                'message': f'Heure prévue définie à {heure_prevue.strftime("%d/%m/%Y %H:%M")}',
+                'type': 'success',
+            }
+        }
+
+    def action_clear_heure_prevue(self):
+        """Action pour effacer l'heure prévue"""
+        self.ensure_one()
+        
+        self.write({'heure_prevue': False})
+        
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': 'Heure prévue effacée',
+                'message': 'L\'heure prévue a été effacée',
+                'type': 'info',
+            }
+        }
+
+    @api.model
+    def _create_heure_prevue_actions(self):
+        """Crée automatiquement les actions pour l'heure prévue"""
+        try:
+            # Action pour définir l'heure prévue
+            action_set = self.env['ir.actions.server'].search([
+                ('name', '=', 'Définir heure prévue'),
+                ('model_id.model', '=', 'pos.order')
+            ], limit=1)
+            
+            if not action_set:
+                action_set = self.env['ir.actions.server'].create({
+                    'name': 'Définir heure prévue',
+                    'model_id': self.env['ir.model'].search([('model', '=', 'pos.order')], limit=1).id,
+                    'state': 'code',
+                    'code': 'if records:\n    records.action_set_heure_prevue()',
+                    'binding_model_id': self.env['ir.model'].search([('model', '=', 'pos.order')], limit=1).id,
+                    'binding_view_types': 'form',
+                })
+                _logger.info("Action 'Définir heure prévue' créée")
+            
+            # Action rapide pour définir l'heure prévue dans 1 heure
+            action_rapide = self.env['ir.actions.server'].search([
+                ('name', '=', 'Heure prévue +1h'),
+                ('model_id.model', '=', 'pos.order')
+            ], limit=1)
+            
+            if not action_rapide:
+                action_rapide = self.env['ir.actions.server'].create({
+                    'name': 'Heure prévue +1h',
+                    'model_id': self.env['ir.model'].search([('model', '=', 'pos.order')], limit=1).id,
+                    'state': 'code',
+                    'code': 'if records:\n    records.action_set_heure_prevue_rapide()',
+                    'binding_model_id': self.env['ir.model'].search([('model', '=', 'pos.order')], limit=1).id,
+                    'binding_view_types': 'form',
+                })
+                _logger.info("Action 'Heure prévue +1h' créée")
+            
+            # Action pour effacer l'heure prévue
+            action_clear = self.env['ir.actions.server'].search([
+                ('name', '=', 'Effacer heure prévue'),
+                ('model_id.model', '=', 'pos.order')
+            ], limit=1)
+            
+            if not action_clear:
+                action_clear = self.env['ir.actions.server'].create({
+                    'name': 'Effacer heure prévue',
+                    'model_id': self.env['ir.model'].search([('model', '=', 'pos.order')], limit=1).id,
+                    'state': 'code',
+                    'code': 'if records:\n    records.action_clear_heure_prevue()',
+                    'binding_model_id': self.env['ir.model'].search([('model', '=', 'pos.order')], limit=1).id,
+                    'binding_view_types': 'form',
+                })
+                _logger.info("Action 'Effacer heure prévue' créée")
+            
+            return True
+            
+        except Exception as e:
+            _logger.error(f"Erreur lors de la création des actions: {str(e)}")
+            return False
 
 class QuantiteProduit(models.Model):
     _name = 'take_a_way_loyalty.quantite_produit'

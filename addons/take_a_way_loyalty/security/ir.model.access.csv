@@ -22,3 +22,4 @@ access_take_a_way_loyalty_quantite_produit_user,take_a_way_loyalty.quantite_prod
 access_take_a_way_loyalty_quantite_produit_manager,take_a_way_loyalty.quantite_produit.manager,model_take_a_way_loyalty_quantite_produit,base.group_system,1,1,1,1
 access_add_participant_wizard,add.participant.wizard,model_add_participant_wizard,base.group_user,1,1,1,0
 access_parrainage_wizard,parrainage.wizard,model_parrainage_wizard,base.group_user,1,1,1,0
+access_heure_prevue_wizard,heure.prevue.wizard,model_heure_prevue_wizard,base.group_user,1,1,1,0
