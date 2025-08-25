@@ -2,56 +2,70 @@
 
 import { patch } from "@web/core/utils/patch";
 
+// Variable pour éviter l'exécution multiple
+let isInitialized = false;
+
 // Fonction pour injecter la colonne "Heure prévue" dans le tableau des commandes
 function injectHeurePrevueColumn() {
-    console.log('[TAKE_A_WAY_LOYALTY] Tentative d\'injection de la colonne Heure prévue...');
+    if (isInitialized) {
+        console.log('[TAKE_A_WAY_LOYALTY] Déjà initialisé, sortie...');
+        return;
+    }
     
-    // Attendre que le DOM soit chargé
-    setTimeout(() => {
-        try {
-            // Trouver l'en-tête du tableau
-            const headerRow = document.querySelector('.header-row');
-            if (!headerRow) {
-                console.log('[TAKE_A_WAY_LOYALTY] En-tête du tableau non trouvé, nouvelle tentative dans 1s...');
-                setTimeout(injectHeurePrevueColumn, 1000);
+    console.log('[TAKE_A_WAY_LOYALTY] Injection de la colonne Heure prévue...');
+    
+    try {
+        // Trouver TOUS les en-têtes de tableaux
+        const headerRows = document.querySelectorAll('.header-row');
+        console.log(`[TAKE_A_WAY_LOYALTY] Trouvé ${headerRows.length} en-têtes de tableaux`);
+        
+        headerRows.forEach((headerRow, headerIndex) => {
+            // Vérifier si la colonne a déjà été ajoutée dans cet en-tête
+            if (headerRow.querySelector('.heure-prevue-header')) {
+                console.log(`[TAKE_A_WAY_LOYALTY] En-tête ${headerIndex} déjà traité`);
                 return;
             }
             
-            // Trouver la colonne "Date"
+            // Trouver la colonne "Date" (première colonne wide)
             const dateColumn = headerRow.querySelector('.col[class*="wide"]:first-child');
             if (!dateColumn) {
-                console.log('[TAKE_A_WAY_LOYALTY] Colonne Date non trouvée');
+                console.log(`[TAKE_A_WAY_LOYALTY] Colonne Date non trouvée dans l'en-tête ${headerIndex}`);
                 return;
             }
             
             // Créer la nouvelle colonne "Heure prévue"
             const heurePrevueHeader = document.createElement('div');
-            heurePrevueHeader.className = 'col wide p-2';
+            heurePrevueHeader.className = 'col wide p-2 heure-prevue-header';
             heurePrevueHeader.textContent = 'Heure prévue';
             heurePrevueHeader.style.minWidth = '120px';
             
             // Insérer après la colonne Date
             dateColumn.parentNode.insertBefore(heurePrevueHeader, dateColumn.nextSibling);
             
-            console.log('[TAKE_A_WAY_LOYALTY] En-tête de colonne Heure prévue ajouté');
-            
-            // Maintenant ajouter la colonne dans chaque ligne de commande
-            injectHeurePrevueInRows();
-            
-        } catch (error) {
-            console.error('[TAKE_A_WAY_LOYALTY] Erreur lors de l\'injection de l\'en-tête:', error);
-        }
-    }, 500);
+            console.log(`[TAKE_A_WAY_LOYALTY] En-tête de colonne Heure prévue ajouté dans l'en-tête ${headerIndex}`);
+        });
+        
+        // Maintenant ajouter la colonne dans TOUTES les lignes de commande
+        injectHeurePrevueInAllRows();
+        
+        // Marquer comme initialisé
+        isInitialized = true;
+        console.log('[TAKE_A_WAY_LOYALTY] Initialisation terminée avec succès');
+        
+    } catch (error) {
+        console.error('[TAKE_A_WAY_LOYALTY] Erreur lors de l\'injection:', error);
+    }
 }
 
-// Fonction pour injecter la colonne dans chaque ligne de commande
-function injectHeurePrevueInRows() {
+// Fonction pour injecter la colonne dans TOUTES les lignes de commande
+function injectHeurePrevueInAllRows() {
     try {
-        // Trouver toutes les lignes de commande
+        // Trouver TOUTES les lignes de commande (tous les tableaux)
         const orderRows = document.querySelectorAll('.order-row');
+        console.log(`[TAKE_A_WAY_LOYALTY] Trouvé ${orderRows.length} lignes de commandes à traiter`);
         
-        orderRows.forEach((orderRow, index) => {
-            // Vérifier si la colonne a déjà été ajoutée
+        orderRows.forEach((orderRow, rowIndex) => {
+            // Vérifier si la colonne a déjà été ajoutée dans cette ligne
             if (orderRow.querySelector('.heure-prevue-cell')) {
                 return;
             }
@@ -80,7 +94,7 @@ function injectHeurePrevueInRows() {
     }
 }
 
-// Fonction pour mettre à jour les valeurs d'heure prévue
+// Fonction pour mettre à jour les valeurs d'heure prévue (une seule fois)
 function updateHeurePrevueValues() {
     try {
         // Ici on pourrait faire un appel API pour récupérer les heures prévues
@@ -105,58 +119,35 @@ function updateHeurePrevueValues() {
     }
 }
 
-// Observer pour détecter les changements dans le DOM
-function setupObserver() {
-    try {
-        const observer = new MutationObserver((mutations) => {
-            mutations.forEach((mutation) => {
-                if (mutation.type === 'childList') {
-                    // Vérifier si de nouvelles lignes ont été ajoutées
-                    const newOrderRows = document.querySelectorAll('.order-row:not(.heure-prevue-processed)');
-                    if (newOrderRows.length > 0) {
-                        newOrderRows.forEach(row => row.classList.add('heure-prevue-processed'));
-                        injectHeurePrevueInRows();
-                    }
-                }
-            });
-        });
-        
-        // Observer les changements dans le conteneur des commandes
-        const ordersContainer = document.querySelector('.orders');
-        if (ordersContainer) {
-            observer.observe(ordersContainer, { childList: true, subtree: true });
-            console.log('[TAKE_A_WAY_LOYALTY] Observer configuré pour détecter les nouvelles commandes');
-        }
-        
-    } catch (error) {
-        console.error('[TAKE_A_WAY_LOYALTY] Erreur lors de la configuration de l\'observer:', error);
-    }
-}
-
-// Fonction principale d'initialisation
+// Fonction principale d'initialisation (une seule fois)
 function initializeHeurePrevueColumn() {
+    if (isInitialized) {
+        console.log('[TAKE_A_WAY_LOYALTY] Déjà initialisé, sortie...');
+        return;
+    }
+    
     console.log('[TAKE_A_WAY_LOYALTY] Initialisation de la colonne Heure prévue...');
     
-    // Première injection
-    injectHeurePrevueColumn();
+    // Attendre un peu que le DOM soit complètement chargé
+    setTimeout(() => {
+        injectHeurePrevueColumn();
+        
+        // Mettre à jour les valeurs une seule fois après l'injection
+        setTimeout(updateHeurePrevueValues, 1000);
+        
+    }, 1000);
     
-    // Configurer l'observer pour les nouvelles commandes
-    setupObserver();
-    
-    // Mettre à jour les valeurs toutes les 5 secondes (pour les tests)
-    setInterval(updateHeurePrevueValues, 5000);
-    
-    console.log('[TAKE_A_WAY_LOYALTY] Initialisation terminée');
+    console.log('[TAKE_A_WAY_LOYALTY] Initialisation programmée');
 }
 
-// Démarrer quand le DOM est prêt
+// Démarrer quand le DOM est prêt (une seule fois)
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', initializeHeurePrevueColumn);
 } else {
     initializeHeurePrevueColumn();
 }
 
-// Démarrer aussi quand on navigue dans le PoS
+// Démarrer aussi quand on navigue dans le PoS (une seule fois par page)
 document.addEventListener('DOMContentLoaded', () => {
     // Attendre un peu que le PoS soit complètement chargé
     setTimeout(initializeHeurePrevueColumn, 2000);
@@ -164,3 +155,4 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // Exporter pour compatibilité avec le système de modules Odoo
 export { initializeHeurePrevueColumn };
+
