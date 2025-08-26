@@ -15,8 +15,13 @@ services:
       - odoo-web-data:/var/lib/odoo
       - ./odoo.conf:/etc/odoo/odoo.conf
       - ./addons:/mnt/extra-addons
+      - ./logs:/var/log/odoo
     command: >- 
-      bash -c "pip install qifparse --break-system-packages && odoo --db_host=db --db_port=5432 --db_user=odoo --db_password=4wc2-7uej-au4y --init base,init_config,account,l10n_ch,stock,point_of_sale,purchase,mrp,sale_management,crm,base_account_budget,base_accounting_kit,take_a_way_loyalty --without-demo=all --load-language fr_CH -d db-odoo-ta"
+      bash -c "
+        echo '=== Démarrage du container Odoo - $(date) ===' > /var/log/odoo/container.log &&
+        pip install qifparse --break-system-packages &&
+        odoo --db_host=db --db_port=5432 --db_user=odoo --db_password=4wc2-7uej-au4y --init base,init_config,account,l10n_ch,stock,point_of_sale,purchase,mrp,sale_management,crm,base_account_budget,base_accounting_kit,take_a_way_loyalty --without-demo=all --load-language fr_CH -d db-odoo-ta 2>&1 | tee -a /var/log/odoo/container.log
+      "
     logging:
       driver: "json-file"
       options:

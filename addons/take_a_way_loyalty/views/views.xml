@@ -604,5 +604,33 @@
         </field>
     </record>
 
+<<<<<<< HEAD
   
+=======
+    <!-- Vue pour étendre le formulaire des commandes PoS avec l'heure prévue -->
+    <record id="view_pos_order_form_inherit_heure_prevue" model="ir.ui.view">
+        <field name="name">pos.order.form.inherit.heure.prevue</field>
+        <field name="model">pos.order</field>
+        <field name="inherit_id" ref="point_of_sale.view_pos_pos_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='date_order']" position="after">
+                <field name="heure_prevue" string="Heure prévue" widget="datetime"/>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Vue pour étendre la liste des commandes PoS avec l'heure prévue -->
+    <record id="view_pos_order_tree_inherit_heure_prevue" model="ir.ui.view">
+        <field name="name">pos.order.tree.inherit.heure.prevue</field>
+        <field name="model">pos.order</field>
+        <field name="inherit_id" ref="point_of_sale.view_pos_order_tree"/>
+        <field name="arch" type="xml">
+            <xpath expr="//field[@name='date_order']" position="after">
+                <field name="heure_prevue" string="Heure prévue"/>
+            </xpath>
+        </field>
+    </record>
+
+  </data>
+>>>>>>> e8d21364ca2aea980dcfa810887bd4d4985a8276
 </odoo>

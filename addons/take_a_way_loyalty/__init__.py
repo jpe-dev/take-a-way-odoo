@@ -48,3 +48,5 @@ def post_init_hook(env):
         print(f"Erreur lors de l'exécution du post_init_hook: {str(e)}")
         # Ne pas faire échouer l'installation si le hook échoue
         pass
+
+# Hook supprimé car cause des erreurs
