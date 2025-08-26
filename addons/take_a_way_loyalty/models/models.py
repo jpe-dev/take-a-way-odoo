@@ -923,6 +923,9 @@ class ConditionMission(models.Model):
 class PosOrder(models.Model):
     _inherit = 'pos.order'
 
+    # Heure prévue (modifiable après création depuis le backend)
+    heure_prevue = fields.Datetime(string='Heure prévue', help='Heure prévue de préparation / retrait / livraison')
+
     def _check_missions_manual(self):
         """Méthode manuelle pour déclencher la vérification des missions"""
         for order in self:
@@ -1517,4 +1520,331 @@ class ProductTemplate(models.Model):
     _inherit = 'product.template'
 
     disponibilite_inventaire = fields.Boolean(string='Disponible en inventaire', default=True)
+
+    def _get_pos_products_domain(self):
+        """Surcharge pour filtrer les produits disponibles dans le PoS"""
+        _logger.info("[DISPO_POS] ProductTemplate._get_pos_products_domain appelée")
+        
+        domain = super(ProductTemplate, self)._get_pos_products_domain()
+        
+        _logger.info("[DISPO_POS] ProductTemplate domaine initial: %s", domain)
+        
+        # Ajouter le filtre de disponibilité
+        domain += [('disponibilite_inventaire', '=', True)]
+        
+        _logger.info("[DISPO_POS] ProductTemplate domaine final: %s", domain)
+        return domain
+
+    @api.model
+    def _get_pos_products(self, pos_config_id=None):
+        """Surcharge pour retourner les produits disponibles pour le PoS"""
+        _logger.info("[DISPO_POS] ProductTemplate._get_pos_products appelée avec pos_config_id: %s", pos_config_id)
+        
+        domain = self._get_pos_products_domain()
+        
+        _logger.info("[DISPO_POS] ProductTemplate domaine final: %s", domain)
+        products = self.search(domain)
+        _logger.info("[DISPO_POS] ProductTemplate nombre de produits retournés: %s", len(products))
+        
+        return products
+
+    def write(self, vals):
+        """Surcharge pour forcer le rechargement des sessions PoS quand la disponibilité change"""
+        result = super(ProductTemplate, self).write(vals)
+        
+        # Si la disponibilité a changé, forcer le rechargement des sessions PoS actives
+        if 'disponibilite_inventaire' in vals:
+            _logger.info("[DISPO_POS] Disponibilité changée pour %s: %s", self.mapped('name'), vals['disponibilite_inventaire'])
+            
+            # Récupérer toutes les sessions PoS actives
+            active_sessions = self.env['pos.session'].search([
+                ('state', '=', 'opened')
+            ])
+            
+            for session in active_sessions:
+                try:
+                    session.force_reload_products()
+                except Exception as e:
+                    _logger.error("[DISPO_POS] Erreur lors du rechargement de la session %s: %s", session.id, str(e))
+        
+        return result
+
+
+class PosConfig(models.Model):
+    _inherit = 'pos.config'
+
+    def _get_available_products(self):
+        """Surcharge pour filtrer les produits disponibles dans le PoS"""
+        _logger.info("[DISPO_POS] PosConfig._get_available_products appelée pour la config %s", self.id)
+        
+        products = super(PosConfig, self)._get_available_products()
+        
+        _logger.info("[DISPO_POS] Nombre de produits avant filtrage: %s", len(products))
+        
+        # Filtrer les produits non disponibles
+        available_products = products.filtered(lambda p: p.product_tmpl_id.disponibilite_inventaire)
+        
+        _logger.info("[DISPO_POS] Nombre de produits après filtrage: %s", len(available_products))
+        
+        return available_products
+
+    def _get_products_domain(self):
+        """Surcharge pour ajouter le filtre de disponibilité au domaine des produits"""
+        _logger.info("[DISPO_POS] PosConfig._get_products_domain appelée pour la config %s", self.id)
+        
+        domain = super(PosConfig, self)._get_products_domain()
+        
+        _logger.info("[DISPO_POS] Domaine initial: %s", domain)
+        
+        # Ajouter le filtre de disponibilité
+        domain += [('product_tmpl_id.disponibilite_inventaire', '=', True)]
+        
+        _logger.info("[DISPO_POS] Domaine final: %s", domain)
+        return domain
+
+
+class PosSession(models.Model):
+    _inherit = 'pos.session'
+
+    def _loader_params_product_product(self):
+        """Surcharge pour filtrer les produits non disponibles lors du chargement de la session PoS"""
+        _logger.info("[DISPO_POS] _loader_params_product_product appelée pour la session %s", self.id)
+        
+        params = super(PosSession, self)._loader_params_product_product()
+        
+        _logger.info("[DISPO_POS] Paramètres initiaux: %s", params)
+        
+        # Ajouter le filtre de disponibilité au domaine
+        # Selon la version d'Odoo, les paramètres peuvent contenir directement
+        # une clé 'domain' (liste) ou une clé imbriquée 'search_params' avec un 'domain'.
+        try:
+            if 'search_params' in params:
+                search_params = params['search_params'] or {}
+                existing_domain = search_params.get('domain') or []
+                # S'assurer que le domaine est une liste
+                if not isinstance(existing_domain, list):
+                    _logger.warning("[DISPO_POS] Domaine inattendu (type %s) dans search_params, remplacement par liste",
+                                    type(existing_domain))
+                    existing_domain = []
+                search_params['domain'] = existing_domain + [('product_tmpl_id.disponibilite_inventaire', '=', True)]
+                params['search_params'] = search_params
+            elif 'domain' in params:
+                existing_domain = params.get('domain') or []
+                if not isinstance(existing_domain, list):
+                    _logger.warning("[DISPO_POS] Domaine inattendu (type %s) dans params, remplacement par liste",
+                                    type(existing_domain))
+                    existing_domain = []
+                params['domain'] = existing_domain + [('product_tmpl_id.disponibilite_inventaire', '=', True)]
+            else:
+                params['domain'] = [('product_tmpl_id.disponibilite_inventaire', '=', True)]
+        except Exception as e:
+            _logger.error("[DISPO_POS] Erreur lors de l'ajout du filtre de disponibilité au domaine: %s", str(e))
+        
+        _logger.info("[DISPO_POS] Paramètres finaux: %s", params)
+        return params
+
+    def _get_pos_products_domain(self):
+        """Surcharge pour ajouter le filtre de disponibilité au domaine des produits PoS"""
+        _logger.info("[DISPO_POS] _get_pos_products_domain appelée pour la session %s", self.id)
+        
+        domain = super(PosSession, self)._get_pos_products_domain()
+        
+        _logger.info("[DISPO_POS] Domaine initial: %s", domain)
+        
+        # Ajouter le filtre de disponibilité
+        domain += [('product_tmpl_id.disponibilite_inventaire', '=', True)]
+        
+        _logger.info("[DISPO_POS] Domaine final: %s", domain)
+        return domain
+
+    def force_reload_products(self):
+        """Force le rechargement des produits dans la session PoS"""
+        try:
+            # Invalider le cache en modifiant un champ de la session
+            self.write({'update_stock_at_closing': self.update_stock_at_closing})
+            _logger.info("[DISPO_POS] Session PoS %s forcée pour rechargement", self.id)
+            return True
+        except Exception as e:
+            _logger.error("[DISPO_POS] Erreur lors du rechargement forcé de la session %s: %s", self.id, str(e))
+            return False
+
+    def _load_model_data(self, model_name, domain=None, fields=None):
+        """Surcharge pour filtrer les produits lors du chargement des données"""
+        _logger.info("[DISPO_POS] _load_model_data appelée pour model_name: %s", model_name)
+        
+        if model_name == 'product.product':
+            _logger.info("[DISPO_POS] _load_model_data appelée pour product.product")
+            if domain is None:
+                domain = []
+            domain += [('product_tmpl_id.disponibilite_inventaire', '=', True)]
+            _logger.info("[DISPO_POS] Domaine modifié pour product.product: %s", domain)
+        
+        result = super(PosSession, self)._load_model_data(model_name, domain, fields)
+        _logger.info("[DISPO_POS] _load_model_data résultat pour %s: %s", model_name, len(result) if isinstance(result, list) else result)
+        return result
+
+    def load_data(self, models_to_load=None):
+        """Surcharge pour ajouter des logs lors du chargement des données"""
+        _logger.info("[DISPO_POS] load_data appelée pour la session %s", self.id)
+        _logger.info("[DISPO_POS] models_to_load: %s", models_to_load)
+        
+        result = super(PosSession, self).load_data(models_to_load)
+        
+        # Analyser la structure des données retournées
+        _logger.info("[DISPO_POS] Clés dans result: %s", list(result.keys()) if isinstance(result, dict) else "Non dict")
+        
+        # Filtrer les produits non disponibles dans le résultat
+        if 'product.product' in result:
+            _logger.info("[DISPO_POS] Filtrage des produits dans load_data")
+            products = result['product.product']
+            
+            # Analyser le type et la structure
+            _logger.info("[DISPO_POS] Type de products: %s", type(products))
+            if isinstance(products, dict):
+                _logger.info("[DISPO_POS] Clés dans products: %s", list(products.keys()))
+                # Si c'est un dict, c'est probablement un cache ou une structure différente
+                # Ne pas filtrer pour l'instant, juste logger
+                _logger.info("[DISPO_POS] Structure dict détectée, pas de filtrage appliqué")
+            elif isinstance(products, list):
+                _logger.info("[DISPO_POS] Nombre de produits dans la liste: %s", len(products))
+                if products:
+                    _logger.info("[DISPO_POS] Premier produit: %s", products[0])
+                
+                filtered_products = []
+                for product in products:
+                    if isinstance(product, dict):
+                        if product.get('product_tmpl_id'):
+                            template_id = product['product_tmpl_id'][0]
+                            template = self.env['product.template'].browse(template_id)
+                            
+                            if template.disponibilite_inventaire:
+                                filtered_products.append(product)
+                                _logger.info("[DISPO_POS] Produit gardé: %s", product.get('name', 'Unknown'))
+                            else:
+                                _logger.info("[DISPO_POS] Produit filtré: %s", product.get('name', 'Unknown'))
+                        else:
+                            filtered_products.append(product)
+                            _logger.info("[DISPO_POS] Produit sans template gardé: %s", product.get('name', 'Unknown'))
+                    else:
+                        filtered_products.append(product)
+                        _logger.info("[DISPO_POS] Produit de type %s gardé: %s", type(product), product)
+                
+                result['product.product'] = filtered_products
+                _logger.info("[DISPO_POS] Nombre de produits après filtrage: %s", len(filtered_products))
+            else:
+                _logger.info("[DISPO_POS] Format inattendu pour products: %s", type(products))
+        else:
+            _logger.info("[DISPO_POS] Pas de 'product.product' dans le résultat")
+        
+        _logger.info("[DISPO_POS] load_data terminée pour la session %s", self.id)
+        return result
+
+    def _loader_params(self, model_name):
+        """Surcharge pour ajouter des logs lors du chargement des paramètres"""
+        _logger.info("[DISPO_POS] _loader_params appelée pour model_name: %s", model_name)
+        
+        result = super(PosSession, self)._loader_params(model_name)
+        
+        if model_name == 'product.product':
+            _logger.info("[DISPO_POS] _loader_params pour product.product: %s", result)
+        
+        return result
+
+
+class ProductProduct(models.Model):
+    _inherit = 'product.product'
+
+    def _get_pos_products_domain(self):
+        """Surcharge pour filtrer les produits disponibles dans le PoS"""
+        _logger.info("[DISPO_POS] ProductProduct._get_pos_products_domain appelée")
+        
+        domain = super(ProductProduct, self)._get_pos_products_domain()
+        
+        _logger.info("[DISPO_POS] Domaine initial: %s", domain)
+        
+        # Ajouter le filtre de disponibilité
+        domain += [('product_tmpl_id.disponibilite_inventaire', '=', True)]
+        
+        _logger.info("[DISPO_POS] Domaine final: %s", domain)
+        return domain
+
+    @api.model
+    def _get_pos_products(self, pos_config_id=None):
+        """Surcharge pour retourner les produits disponibles pour le PoS"""
+        _logger.info("[DISPO_POS] ProductProduct._get_pos_products appelée avec pos_config_id: %s", pos_config_id)
+        
+        domain = self._get_pos_products_domain()
+        
+        # Ajouter les filtres standard du PoS si nécessaire
+        if pos_config_id:
+            pos_config = self.env['pos.config'].browse(pos_config_id)
+            if pos_config.iface_available_categ_ids:
+                domain += [('pos_categ_id', 'in', pos_config.iface_available_categ_ids.ids)]
+        
+        _logger.info("[DISPO_POS] Domaine final pour _get_pos_products: %s", domain)
+        products = self.search(domain)
+        _logger.info("[DISPO_POS] Nombre de produits retournés: %s", len(products))
+        
+        return products
+
+    def _get_pos_products_domain_old(self):
+        """Ancienne méthode pour compatibilité"""
+        _logger.info("[DISPO_POS] ProductProduct._get_pos_products_domain_old appelée")
+        return [('product_tmpl_id.disponibilite_inventaire', '=', True)]
+
+    def search_read(self, domain=None, fields=None, offset=0, limit=None, order=None, **kwargs):
+        """Surcharge pour filtrer les produits lors des recherches"""
+        _logger.info("[DISPO_POS] ProductProduct.search_read appelée")
+        _logger.info("[DISPO_POS] Domaine initial search_read: %s", domain)
+        _logger.info("[DISPO_POS] Paramètres supplémentaires: %s", kwargs)
+        
+        if domain is None:
+            domain = []
+        
+        # Ajouter le filtre de disponibilité si ce n'est pas déjà présent
+        disponibilite_filter = ('product_tmpl_id.disponibilite_inventaire', '=', True)
+        if disponibilite_filter not in domain:
+            domain += [disponibilite_filter]
+            _logger.info("[DISPO_POS] Filtre de disponibilité ajouté au domaine search_read")
+        
+        _logger.info("[DISPO_POS] Domaine final search_read: %s", domain)
+        
+        result = super(ProductProduct, self).search_read(domain, fields, offset, limit, order, **kwargs)
+        _logger.info("[DISPO_POS] search_read retourne %s résultats", len(result))
+        
+        return result
+
+    def _load_pos_data(self, data):
+        """Surcharge Odoo 18: filtre les produits après chargement.
+
+        L'API appelle désormais `_load_pos_data(response)` avec `response` (dict)
+        en paramètre. On délègue au parent puis on filtre le résultat retourné
+        (liste de records sérialisés) en fonction de la disponibilité.
+        """
+        _logger.info("[DISPO_POS] ProductProduct._load_pos_data appelée (type arg=%s)", type(data))
+
+        # Appel parent avec la signature actuelle
+        result = super(ProductProduct, self)._load_pos_data(data)
+
+        # Filtrage défensif du résultat pour ne garder que les produits dont
+        # le template est disponible en inventaire
+        try:
+            if isinstance(result, list):
+                filtered = []
+                for product in result:
+                    if isinstance(product, dict):
+                        tmpl_field = product.get('product_tmpl_id')
+                        if tmpl_field:
+                            template_id = tmpl_field[0] if isinstance(tmpl_field, (list, tuple)) else tmpl_field
+                            template = self.env['product.template'].browse(template_id)
+                            if template.disponibilite_inventaire:
+                                filtered.append(product)
+                        else:
+                            filtered.append(product)
+                _logger.info("[DISPO_POS] _load_pos_data filtré: %s -> %s", len(result), len(filtered))
+                return filtered
+        except Exception as e:
+            _logger.error("[DISPO_POS] Erreur durant le filtrage _load_pos_data: %s", str(e))
+
+        return result
 

@@ -1,6 +1,43 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
-  <data>
+    <!-- Inherit POS order form to add Heure prévue field -->
+
+    <!-- Inherit POS order form to add Heure prévue field -->
+    <record id="view_pos_order_form_inherit_heure_prevue" model="ir.ui.view">
+        <field name="name">pos.order.form.inherit.heure_prevue</field>
+        <field name="model">pos.order</field>
+        <field name="inherit_id" ref="point_of_sale.view_pos_pos_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="(//sheet//group)[1]" position="inside">
+                <field name="heure_prevue"/>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Inherit POS order tree (backend list). Depending on the base view name, try common id -->
+    <record id="view_pos_order_tree_inherit_heure_prevue_alt" model="ir.ui.view">
+        <field name="name">pos.order.tree.inherit.heure_prevue.alt</field>
+        <field name="model">pos.order</field>
+        <field name="inherit_id" ref="point_of_sale.view_pos_order_tree"/>
+        <field name="arch" type="xml">
+            <!-- Insert after the date column to ensure visibility -->
+            <xpath expr="//list/field[@name='date_order']" position="after">
+                <field name="heure_prevue" optional="show"/>
+            </xpath>
+        </field>
+    </record>
+
+    <!-- Inherit the alternative list view without session -->
+    <record id="view_pos_order_tree_no_session_inherit_heure_prevue" model="ir.ui.view">
+        <field name="name">pos.order.tree.no_session.inherit.heure_prevue</field>
+        <field name="model">pos.order</field>
+        <field name="inherit_id" ref="point_of_sale.view_pos_order_tree_no_session_id"/>
+        <field name="arch" type="xml">
+            <xpath expr="//list/field[@name='date_order']" position="after">
+                <field name="heure_prevue" optional="show"/>
+            </xpath>
+        </field>
+    </record>
     <!-- Vues pour Condition Mission -->
     <record id="view_condition_mission_tree" model="ir.ui.view">
         <field name="name">take_a_way_loyalty.condition_mission.tree</field>
@@ -117,6 +154,7 @@
                                widget="many2many_tags"
                                invisible="type_condition_code != 'ACHAT_PRODUIT'"
                                required="type_condition_code == 'ACHAT_PRODUIT'"
+                               domain="[('product_tmpl_id.disponibilite_inventaire', '=', True)]"
                                options="{'no_create': True, 'no_open': True}"/>
                         <field name="quantites_produits"
                                invisible="type_condition_code != 'ACHAT_PRODUIT' or not produits_ids"
@@ -277,7 +315,7 @@
                             <field name="condition_ids">
                                 <list editable="bottom">
                                     <field name="type_condition"/>
-                                    <field name="produits_ids" widget="many2many_tags" invisible="type_condition_code != 'ACHAT_PRODUIT'"/>
+                                    <field name="produits_ids" widget="many2many_tags" invisible="type_condition_code != 'ACHAT_PRODUIT'" domain="[('product_tmpl_id.disponibilite_inventaire', '=', True)]"/>
                                     <field name="categories_ids" widget="many2many_tags" invisible="type_condition_code not in ['CATEGORIE_PRODUIT', 'ACHAT_TOUTES_CATEGORIES']"/>
                                     <field name="quantite" invisible="type_condition_code not in ['ACHAT_PRODUIT', 'CATEGORIE_PRODUIT', 'PARRAINAGE', 'ACHATS_JOUR']"/>
                                     <field name="resume_quantites" readonly="1" invisible="type_condition_code != 'ACHAT_PRODUIT' or not produits_ids"/>
@@ -566,5 +604,5 @@
         </field>
     </record>
 
-  </data>
+  
 </odoo>
