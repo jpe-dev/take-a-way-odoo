@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates id="template" xml:space="preserve">
+
+    <!-- Widget pour afficher l'heure prévue dans le PoS -->
+    <t t-name="take_a_way_loyalty.HeurePrevueWidget" owl="1">
+        <div class="heure-prevue-widget">
+            <div class="heure-prevue-display" t-if="props.order.heure_prevue">
+                <span class="heure-prevue-label">Heure prévue:</span>
+                <span class="heure-prevue-value"><t t-esc="props.order.getHeurePrevueFormatted()"/></span>
+                <button class="btn btn-sm btn-outline-danger" t-on-click="clearHeurePrevue">
+                    <i class="fa fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="heure-prevue-actions" t-if="!props.order.heure_prevue">
+                <button class="btn btn-sm btn-outline-primary" t-on-click="openHeurePrevuePopup">
+                    <i class="fa fa-clock-o"></i> Définir heure
+                </button>
+                <button class="btn btn-sm btn-outline-success" t-on-click="setHeurePrevueRapide">
+                    <i class="fa fa-plus"></i> +1h
+                </button>
+            </div>
+        </div>
+    </t>
+
+    <!-- Popup pour définir l'heure prévue -->
+    <t t-name="take_a_way_loyalty.HeurePrevuePopup" owl="1">
+        <div class="popup heure-prevue-popup">
+            <div class="popup-header">
+                <h3>Définir l'heure prévue</h3>
+                <button class="btn-close" t-on-click="cancel">
+                    <i class="fa fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="popup-body">
+                <div class="options-rapides">
+                    <h4>Options rapides</h4>
+                    <div class="btn-group">
+                        <button class="btn btn-outline-primary" t-on-click="() => this.setOptionRapide(30)">
+                            +30 min
+                        </button>
+                        <button class="btn btn-outline-primary" t-on-click="() => this.setOptionRapide(60)">
+                            +1h
+                        </button>
+                        <button class="btn btn-outline-primary" t-on-click="() => this.setOptionRapide(120)">
+                            +2h
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="heure-custom">
+                    <h4>Heure personnalisée</h4>
+                    <input type="datetime-local" 
+                           class="form-control" 
+                           t-att-value="state.heurePrevue.toISOString().slice(0, 16)"
+                           t-on-change="(ev) => this.state.heurePrevue = new Date(ev.target.value)"/>
+                </div>
+            </div>
+            
+            <div class="popup-footer">
+                <button class="btn btn-secondary" t-on-click="cancel">Annuler</button>
+                <button class="btn btn-primary" t-on-click="confirm">Confirmer</button>
+            </div>
+        </div>
+    </t>
+
+    <!-- Extension du template OrderWidget pour inclure notre widget -->
+    <t t-name="take_a_way_loyalty.OrderWidgetExtension" t-inherit="point_of_sale.OrderWidget" t-inherit-mode="extension" owl="1">
+        <xpath expr="//div[hasclass('order-info')]" position="inside">
+            <HeurePrevueWidget t-if="props.order" order="props.order"/>
+        </xpath>
+    </t>
+
+</templates> 

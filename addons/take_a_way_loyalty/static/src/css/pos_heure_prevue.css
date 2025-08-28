@@ -1,0 +1,115 @@
+/* Styles pour le widget heure prévue dans le PoS */
+
+.heure-prevue-widget {
+    margin: 10px 0;
+    padding: 10px;
+    border: 1px solid #ddd;
+    border-radius: 5px;
+    background-color: #f9f9f9;
+}
+
+.heure-prevue-display {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 5px;
+    background-color: #e8f5e8;
+    border-radius: 3px;
+}
+
+.heure-prevue-label {
+    font-weight: bold;
+    color: #28a745;
+}
+
+.heure-prevue-value {
+    font-size: 14px;
+    color: #333;
+    margin: 0 10px;
+}
+
+.heure-prevue-actions {
+    display: flex;
+    gap: 5px;
+}
+
+.heure-prevue-actions .btn {
+    flex: 1;
+    font-size: 12px;
+    padding: 5px 10px;
+}
+
+/* Styles pour le popup */
+.heure-prevue-popup {
+    max-width: 400px;
+    width: 90vw;
+}
+
+.heure-prevue-popup .popup-header {
+    background-color: #007bff;
+    color: white;
+    padding: 15px;
+    border-radius: 5px 5px 0 0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.heure-prevue-popup .popup-header h3 {
+    margin: 0;
+    font-size: 18px;
+}
+
+.heure-prevue-popup .popup-body {
+    padding: 20px;
+}
+
+.options-rapides {
+    margin-bottom: 20px;
+}
+
+.options-rapides h4 {
+    margin-bottom: 10px;
+    color: #333;
+}
+
+.btn-group {
+    display: flex;
+    gap: 5px;
+}
+
+.btn-group .btn {
+    flex: 1;
+    font-size: 12px;
+}
+
+.heure-custom h4 {
+    margin-bottom: 10px;
+    color: #333;
+}
+
+.heure-custom input {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 3px;
+}
+
+.heure-prevue-popup .popup-footer {
+    padding: 15px;
+    border-top: 1px solid #ddd;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+    .heure-prevue-actions {
+        flex-direction: column;
+    }
+    
+    .btn-group {
+        flex-direction: column;
+    }
+} 
