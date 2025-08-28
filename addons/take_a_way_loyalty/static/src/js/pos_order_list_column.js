@@ -1,158 +1,211 @@
 /** @odoo-module **/
 
-import { patch } from "@web/core/utils/patch";
+// Colonne "Heure prévue" dans la liste des commandes PoS (écran de gestion des commandes)
 
-// Variable pour éviter l'exécution multiple
-let isInitialized = false;
+let rootObserver = null;
+let listObserver = null;
 
-// Fonction pour injecter la colonne "Heure prévue" dans le tableau des commandes
-function injectHeurePrevueColumn() {
-    if (isInitialized) {
-        console.log('[TAKE_A_WAY_LOYALTY] Déjà initialisé, sortie...');
-        return;
-    }
-    
-    console.log('[TAKE_A_WAY_LOYALTY] Injection de la colonne Heure prévue...');
-    
-    try {
-        // Trouver TOUS les en-têtes de tableaux
-        const headerRows = document.querySelectorAll('.header-row');
-        console.log(`[TAKE_A_WAY_LOYALTY] Trouvé ${headerRows.length} en-têtes de tableaux`);
-        
-        headerRows.forEach((headerRow, headerIndex) => {
-            // Vérifier si la colonne a déjà été ajoutée dans cet en-tête
-            if (headerRow.querySelector('.heure-prevue-header')) {
-                console.log(`[TAKE_A_WAY_LOYALTY] En-tête ${headerIndex} déjà traité`);
-                return;
-            }
-            
-            // Trouver la colonne "Date" (première colonne wide)
-            const dateColumn = headerRow.querySelector('.col[class*="wide"]:first-child');
-            if (!dateColumn) {
-                console.log(`[TAKE_A_WAY_LOYALTY] Colonne Date non trouvée dans l'en-tête ${headerIndex}`);
-                return;
-            }
-            
-            // Créer la nouvelle colonne "Heure prévue"
-            const heurePrevueHeader = document.createElement('div');
-            heurePrevueHeader.className = 'col wide p-2 heure-prevue-header';
-            heurePrevueHeader.textContent = 'Heure prévue';
-            heurePrevueHeader.style.minWidth = '120px';
-            
-            // Insérer après la colonne Date
-            dateColumn.parentNode.insertBefore(heurePrevueHeader, dateColumn.nextSibling);
-            
-            console.log(`[TAKE_A_WAY_LOYALTY] En-tête de colonne Heure prévue ajouté dans l'en-tête ${headerIndex}`);
-        });
-        
-        // Maintenant ajouter la colonne dans TOUTES les lignes de commande
-        injectHeurePrevueInAllRows();
-        
-        // Marquer comme initialisé
-        isInitialized = true;
-        console.log('[TAKE_A_WAY_LOYALTY] Initialisation terminée avec succès');
-        
-    } catch (error) {
-        console.error('[TAKE_A_WAY_LOYALTY] Erreur lors de l\'injection:', error);
-    }
+const RECEIPT_HEADER_HINTS = ['Numéro de reçu', 'Receipt', 'Reçu', 'Order', 'Commande'];
+
+const HEADER_SELECTORS = [
+  '.orders .header-row',
+  '.header-row',
+  'table thead tr',
+];
+
+const ROW_SELECTORS = [
+  '.orders .order-row',
+  '.order-row',
+  'table tbody tr',
+];
+
+function q1(selectors, root) {
+  for (const s of selectors) {
+    const el = (root || document).querySelector(s);
+    if (el) return el;
+  }
+  return null;
 }
 
-// Fonction pour injecter la colonne dans TOUTES les lignes de commande
-function injectHeurePrevueInAllRows() {
-    try {
-        // Trouver TOUTES les lignes de commande (tous les tableaux)
-        const orderRows = document.querySelectorAll('.order-row');
-        console.log(`[TAKE_A_WAY_LOYALTY] Trouvé ${orderRows.length} lignes de commandes à traiter`);
-        
-        orderRows.forEach((orderRow, rowIndex) => {
-            // Vérifier si la colonne a déjà été ajoutée dans cette ligne
-            if (orderRow.querySelector('.heure-prevue-cell')) {
-                return;
-            }
-            
-            // Trouver la première colonne (Date)
-            const firstColumn = orderRow.querySelector('.col:first-child');
-            if (!firstColumn) return;
-            
-            // Créer la cellule "Heure prévue"
-            const heurePrevueCell = document.createElement('div');
-            heurePrevueCell.className = 'col wide p-2 heure-prevue-cell';
-            heurePrevueCell.style.minWidth = '120px';
-            
-            // Pour l'instant, afficher un placeholder
-            // Plus tard, on récupérera la vraie valeur depuis l'API
-            heurePrevueCell.innerHTML = '<div class="text-muted">-</div>';
-            
-            // Insérer après la première colonne
-            firstColumn.parentNode.insertBefore(heurePrevueCell, firstColumn.nextSibling);
-        });
-        
-        console.log(`[TAKE_A_WAY_LOYALTY] Colonne Heure prévue ajoutée dans ${orderRows.length} lignes`);
-        
-    } catch (error) {
-        console.error('[TAKE_A_WAY_LOYALTY] Erreur lors de l\'injection dans les lignes:', error);
-    }
+function qAll(selectors, root) {
+  for (const s of selectors) {
+    const els = (root || document).querySelectorAll(s);
+    if (els && els.length) return els;
+  }
+  return [];
 }
 
-// Fonction pour mettre à jour les valeurs d'heure prévue (une seule fois)
-function updateHeurePrevueValues() {
-    try {
-        // Ici on pourrait faire un appel API pour récupérer les heures prévues
-        // Pour l'instant, on affiche des valeurs de test
-        const heurePrevueCells = document.querySelectorAll('.heure-prevue-cell');
-        
-        heurePrevueCells.forEach((cell, index) => {
-            // Simuler une heure prévue (à remplacer par la vraie logique)
-            const now = new Date();
-            const heurePrevue = new Date(now.getTime() + (index + 1) * 30 * 60 * 1000); // +30min, +1h, +1h30...
-            
-            const hours = heurePrevue.getHours().toString().padStart(2, '0');
-            const minutes = heurePrevue.getMinutes().toString().padStart(2, '0');
-            
-            cell.innerHTML = `<div class="heure-prevue-value">${hours}:${minutes}</div>`;
-        });
-        
-        console.log('[TAKE_A_WAY_LOYALTY] Valeurs d\'heure prévue mises à jour');
-        
-    } catch (error) {
-        console.error('[TAKE_A_WAY_LOYALTY] Erreur lors de la mise à jour des valeurs:', error);
-    }
+function headerCells(tr) {
+  if (!tr) return [];
+  const ths = tr.querySelectorAll(':scope > th, :scope > [role="columnheader"]');
+  if (ths.length) return Array.from(ths);
+  return Array.from(tr.children || []);
 }
 
-// Fonction principale d'initialisation (une seule fois)
-function initializeHeurePrevueColumn() {
-    if (isInitialized) {
-        console.log('[TAKE_A_WAY_LOYALTY] Déjà initialisé, sortie...');
-        return;
-    }
-    
-    console.log('[TAKE_A_WAY_LOYALTY] Initialisation de la colonne Heure prévue...');
-    
-    // Attendre un peu que le DOM soit complètement chargé
-    setTimeout(() => {
-        injectHeurePrevueColumn();
-        
-        // Mettre à jour les valeurs une seule fois après l'injection
-        setTimeout(updateHeurePrevueValues, 1000);
-        
-    }, 1000);
-    
-    console.log('[TAKE_A_WAY_LOYALTY] Initialisation programmée');
+function rowCells(tr) {
+  if (!tr) return [];
+  const tds = tr.querySelectorAll(':scope > td, :scope > [role="cell"]');
+  if (tds.length) return Array.from(tds);
+  return Array.from(tr.children || []);
 }
 
-// Démarrer quand le DOM est prêt (une seule fois)
+function ensureHeaderAfterDate(root) {
+  const tr = q1(HEADER_SELECTORS, root);
+  if (!tr) return false;
+  if (tr.querySelector('.heure-prevue-header')) return true;
+
+  const cells = headerCells(tr);
+  if (!cells.length) return false;
+
+  const dateCell = cells[0]; // "Date" est la première
+  const tag = dateCell.tagName || 'th';
+  const hdr = document.createElement(tag);
+  hdr.className = (dateCell.className || '') + ' heure-prevue-header';
+  hdr.textContent = 'Heure prévue';
+  hdr.style.minWidth = '120px';
+
+  dateCell.parentNode.insertBefore(hdr, dateCell.nextSibling);
+  return true;
+}
+
+function injectRowCells(root) {
+  const rows = qAll(ROW_SELECTORS, root);
+  for (const row of rows) {
+    if (row.querySelector('.heure-prevue-cell')) continue;
+    const cells = rowCells(row);
+    if (!cells.length) continue;
+
+    const dateCell = cells[0];
+    const tag = dateCell.tagName || 'td';
+    const td = document.createElement(tag);
+    td.className = (dateCell.className || '') + ' heure-prevue-cell';
+    td.style.minWidth = '120px';
+    td.innerHTML = '<span class="text-muted">-</span>';
+
+    dateCell.parentNode.insertBefore(td, dateCell.nextSibling);
+  }
+}
+
+function receiptColIndex(root) {
+  const tr = q1(HEADER_SELECTORS, root);
+  const cells = headerCells(tr);
+  if (!cells.length) return 1;
+  for (let i = 0; i < cells.length; i++) {
+    const t = (cells[i].textContent || '').trim();
+    if (t && RECEIPT_HEADER_HINTS.some(h => t.toLowerCase().includes(h.toLowerCase()))) {
+      return i;
+    }
+  }
+  return 1;
+}
+
+function collectRefs(root) {
+  const rows = qAll(ROW_SELECTORS, root);
+  const idx = receiptColIndex(root);
+  const out = [];
+  for (const row of rows) {
+    const cells = rowCells(row);
+    if (!cells.length) continue;
+    const refTxt = (cells[Math.min(idx, cells.length - 1)].textContent || '').replace(/\s+/g, ' ').trim();
+    if (refTxt) out.push({ ref: refTxt, row });
+  }
+  return out;
+}
+
+async function fetchHeures(refs) {
+  if (!refs.length) return [];
+  const uniq = Array.from(new Set(refs.map(r => r.ref)));
+  const payload = {
+    jsonrpc: '2.0',
+    method: 'call',
+    params: {
+      model: 'pos.order',
+      method: 'search_read',
+      args: [[['pos_reference', 'in', uniq]], ['pos_reference', 'heure_prevue']],
+      kwargs: {},
+    },
+  };
+  try {
+    const resp = await fetch('/web/dataset/call_kw', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+      credentials: 'same-origin',
+    });
+    const data = await resp.json();
+    return (data && data.result) || [];
+  } catch (e) {
+    console.error('[TAKE_A_WAY_LOYALTY] RPC erreur:', e);
+    return [];
+  }
+}
+
+function fmtHHMM(dtStr) {
+  if (!dtStr) return '-';
+  const d = new Date(dtStr.replace(' ', 'T') + 'Z'); // UTC -> local
+  if (isNaN(d)) return '-';
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+async function updateValues(root) {
+  const pairs = collectRefs(root);
+  if (!pairs.length) return;
+  const map = new Map();
+  for (const { ref, row } of pairs) {
+    const cell = row.querySelector('.heure-prevue-cell');
+    if (cell) map.set(ref, cell);
+  }
+  const recs = await fetchHeures(pairs);
+  for (const rec of recs) {
+    const key = (rec.pos_reference || '').replace(/\s+/g, ' ').trim();
+    const cell = map.get(key);
+    if (cell) cell.textContent = fmtHHMM(rec.heure_prevue);
+  }
+}
+
+function injectAll(root) {
+  const headerOk = ensureHeaderAfterDate(root);
+  injectRowCells(root);
+  if (headerOk) updateValues(root);
+}
+
+function startListObserver(root) {
+  if (listObserver) listObserver.disconnect();
+  listObserver = new MutationObserver(() => injectAll(root));
+  listObserver.observe(root, { childList: true, subtree: true });
+}
+
+function detectAndInjectForOrdersView() {
+  const ordersRoot = document.querySelector('.orders');
+  if (!ordersRoot) return;
+
+  // Ne pas réinjecter si déjà prêt pour ce conteneur
+  if (ordersRoot.dataset.heurePrevueReady === '1') return;
+
+  // Marquer ce conteneur comme initialisé
+  ordersRoot.dataset.heurePrevueReady = '1';
+
+  // Injections initiales (et replis avec délais pour les rendus différés)
+  setTimeout(() => injectAll(ordersRoot), 0);
+  setTimeout(() => injectAll(ordersRoot), 300);
+  setTimeout(() => injectAll(ordersRoot), 800);
+
+  // Observer les rafraîchissements de la liste (pagination, filtres, etc.)
+  startListObserver(ordersRoot);
+}
+
+function init() {
+  // Observer la page PoS pour détecter quand la vue .orders apparaît
+  if (rootObserver) return;
+  rootObserver = new MutationObserver(() => detectAndInjectForOrdersView());
+  rootObserver.observe(document.body, { childList: true, subtree: true });
+
+  // Premier essai immédiat (si on arrive déjà sur la vue commandes)
+  detectAndInjectForOrdersView();
+}
+
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeHeurePrevueColumn);
+  document.addEventListener('DOMContentLoaded', init);
 } else {
-    initializeHeurePrevueColumn();
+  init();
 }
-
-// Démarrer aussi quand on navigue dans le PoS (une seule fois par page)
-document.addEventListener('DOMContentLoaded', () => {
-    // Attendre un peu que le PoS soit complètement chargé
-    setTimeout(initializeHeurePrevueColumn, 2000);
-});
-
-// Exporter pour compatibilité avec le système de modules Odoo
-export { initializeHeurePrevueColumn };
-

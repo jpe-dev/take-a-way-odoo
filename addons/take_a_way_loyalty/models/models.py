@@ -923,13 +923,8 @@ class ConditionMission(models.Model):
 class PosOrder(models.Model):
     _inherit = 'pos.order'
 
-<<<<<<< HEAD
     # Heure prévue (modifiable après création depuis le backend)
     heure_prevue = fields.Datetime(string='Heure prévue', help='Heure prévue de préparation / retrait / livraison')
-=======
-    # Champ pour l'heure prévue de la commande
-    heure_prevue = fields.Datetime(string='Heure prévue', help='Heure prévue pour la livraison ou le retrait de la commande')
->>>>>>> e8d21364ca2aea980dcfa810887bd4d4985a8276
 
     def _check_missions_manual(self):
         """Méthode manuelle pour déclencher la vérification des missions"""
