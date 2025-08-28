@@ -641,6 +641,12 @@ class MissionUser(models.Model):
             _logger.info("[FIDELITE] Points à ajouter: %s", points_a_ajouter)
             _logger.info("[FIDELITE] Points après: %s", points_apres)
             _logger.info("[FIDELITE] Mission cumulable: %s", mission_user.mission_id.cumulable)
+
+            # Créditer aussi la carte de fidélité native Odoo si disponible
+            try:
+                self._credit_partner_loyalty_card(mission_user, points_a_ajouter)
+            except Exception as e:
+                _logger.warning("[FIDELITE] Échec du crédit de la carte de fidélité native: %s", str(e))
             
             # Gestion des missions cumulables vs non-cumulables
             if mission_user.mission_id.cumulable:
@@ -684,6 +690,190 @@ class MissionUser(models.Model):
         if 'progression' not in vals:
             vals['progression'] = 0
         return vals
+
+    def _credit_partner_loyalty_card(self, mission_user, points_to_add):
+        """Crédite la carte de fidélité native Odoo du partenaire si le module est présent.
+
+        Cette méthode tente d'être résiliente aux différences de versions (Odoo 16/17/18)
+        concernant les noms de champs et les modèles de fidélité.
+        """
+        partner = mission_user.utilisateur_id
+        if not partner or not points_to_add:
+            return False
+
+        # Vérifier la présence des modèles loyalty.*
+        try:
+            card_model = self.env['loyalty.card']
+            _logger.info("[FIDELITE] LOYALTY: Modèle loyalty.card disponible, tentative de crédit. Partenaire=%s, Points=%s", partner.name, points_to_add)
+        except Exception:
+            _logger.info("[FIDELITE] Module de fidélité natif absent (loyalty.card). Crédit ignoré.")
+            return False
+
+        # Tenter de récupérer un programme de fidélité pertinent depuis la config du PdV liée à la mission
+        program = False
+        try:
+            program = getattr(mission_user.mission_id.pos_config_id, 'loyalty_id', False)
+            if program:
+                _logger.info("[FIDELITE] LOYALTY: Programme détecté via pos.config: %s (%s)", getattr(program, 'name', program.id), program.id)
+        except Exception:
+            program = False
+        # Fallback: rechercher n'importe quel programme (idéalement pour le PoS)
+        if not program:
+            try:
+                program_model = self.env['loyalty.program']
+                # Essayer d'abord un programme configuré pour le PoS
+                prog_domain = []
+                if 'applies_on' in program_model._fields:
+                    prog_domain = [('applies_on', 'in', ['pos', 'both'])]
+                program = program_model.search(prog_domain or [], limit=1)
+                _logger.info("[FIDELITE] LOYALTY: Programme fallback trouvé=%s", bool(program))
+            except Exception:
+                program = False
+
+        # Si toujours aucun programme, tenter d'en créer un minimal à la volée
+        if not program:
+            try:
+                program_model = self.env['loyalty.program']
+                create_vals = {'name': 'TAW - Fidélité PoS Auto'}
+                # program_type selection
+                if 'program_type' in program_model._fields:
+                    pt_field = program_model._fields['program_type']
+                    try:
+                        sel = pt_field.selection(self.env) if callable(pt_field.selection) else pt_field.selection
+                        keys = [k for k, _ in (sel or [])]
+                    except Exception:
+                        keys = []
+                    desired = 'loyalty'
+                    create_vals['program_type'] = desired if desired in keys or not keys else keys[0]
+                # applies_on selection
+                if 'applies_on' in program_model._fields:
+                    ao_field = program_model._fields['applies_on']
+                    try:
+                        sel = ao_field.selection(self.env) if callable(ao_field.selection) else ao_field.selection
+                        keys = [k for k, _ in (sel or [])]
+                    except Exception:
+                        keys = []
+                    preferred = None
+                    for opt in ['pos', 'both', 'orders', 'all', 'any']:
+                        if opt in keys:
+                            preferred = opt
+                            break
+                    if preferred:
+                        create_vals['applies_on'] = preferred
+                if 'company_id' in program_model._fields:
+                    create_vals['company_id'] = self.env.company.id
+                if 'active' in program_model._fields:
+                    create_vals['active'] = True
+                program = program_model.create(create_vals)
+                _logger.info("[FIDELITE] LOYALTY: Programme créé à la volée id=%s", program.id)
+            except Exception as e:
+                _logger.warning("[FIDELITE] LOYALTY: Impossible de créer un programme à la volée: %s", str(e))
+
+        # Construire le domaine pour trouver la carte
+        domain = [('partner_id', '=', partner.id)]
+        program_field_name = None
+        try:
+            # Déterminer dynamiquement le champ du programme (souvent 'program_id')
+            if 'program_id' in card_model._fields and program:
+                program_field_name = 'program_id'
+                domain.append((program_field_name, '=', program.id))
+            elif 'program_id' in card_model._fields and not program and getattr(card_model._fields['program_id'], 'required', False):
+                _logger.warning("[FIDELITE] LOYALTY: Aucun programme disponible alors que loyalty.card.program_id est requis. Configurez un programme de fidélité (PoS) pour activer la création des cartes.")
+                return False
+        except Exception:
+            pass
+
+        # Rechercher ou créer la carte
+        _logger.info("[FIDELITE] LOYALTY: Recherche carte avec domaine=%s", domain)
+        card = card_model.search(domain, limit=1)
+        if not card:
+            vals = {'partner_id': partner.id}
+            if program and program_field_name:
+                vals[program_field_name] = program.id
+            try:
+                _logger.info("[FIDELITE] LOYALTY: Création de la carte avec valeurs=%s", vals)
+                card = card_model.create(vals)
+                _logger.info("[FIDELITE] LOYALTY: Carte créée id=%s", card.id)
+            except Exception as e:
+                _logger.warning("[FIDELITE] Impossible de créer la carte de fidélité: %s", str(e))
+                return False
+
+        # Déterminer le champ des points sur la carte et incrémenter
+        possible_point_fields = ['points', 'points_balance', 'points_total', 'points_available']
+        point_field = next((f for f in possible_point_fields if f in card._fields), None)
+        if not point_field:
+            _logger.warning("[FIDELITE] Aucun champ de points reconnu sur loyalty.card: %s", list(card._fields.keys()))
+            return False
+
+        try:
+            current = card[point_field] or 0
+            new_val = current + points_to_add
+            _logger.info("[FIDELITE] LOYALTY: Crédit carte id=%s champ=%s avant=%s +ajout=%s => après=%s", card.id, point_field, current, points_to_add, new_val)
+            card.write({point_field: new_val})
+            _logger.info("[FIDELITE] Carte de fidélité créditée (+%s) pour %s sur champ %s", points_to_add, partner.name, point_field)
+            return True
+        except Exception as e:
+            _logger.warning("[FIDELITE] Échec de l'incrément des points sur loyalty.card: %s", str(e))
+            return False
+
+    @api.model
+    def migrate_points_to_loyalty_cards(self):
+        """Migre les points de la table personnalisée vers les cartes de fidélité natives.
+
+        Pour chaque enregistrement `take_a_way_loyalty.points_utilisateur`, crée (si besoin)
+        une `loyalty.card` pour le partenaire et affecte le total de points.
+        """
+        try:
+            card_model = self.env['loyalty.card']
+        except Exception:
+            _logger.warning("[FIDELITE] Module loyalty non disponible, migration annulée")
+            return False
+
+        # Choisir un programme par défaut si possible
+        program = False
+        try:
+            program_model = self.env['loyalty.program']
+            prog_domain = []
+            if 'applies_on' in program_model._fields:
+                prog_domain = [('applies_on', 'in', ['pos', 'both'])]
+            program = program_model.search(prog_domain or [], limit=1)
+        except Exception:
+            program = False
+
+        # Déterminer champs
+        program_field_name = 'program_id' if 'program_id' in card_model._fields else None
+        possible_point_fields = ['points', 'points_balance', 'points_total', 'points_available']
+        point_field = next((f for f in possible_point_fields if f in card_model._fields), None)
+        if not point_field:
+            _logger.warning("[FIDELITE] Aucun champ points utilisable sur loyalty.card, migration annulée")
+            return False
+
+        migrated = 0
+        for rec in self.env['take_a_way_loyalty.points_utilisateur'].search([]):
+            partner = rec.utilisateur_id
+            if not partner:
+                continue
+            domain = [('partner_id', '=', partner.id)]
+            if program and program_field_name:
+                domain.append((program_field_name, '=', program.id))
+            card = card_model.search(domain, limit=1)
+            if not card:
+                vals = {'partner_id': partner.id}
+                if program and program_field_name:
+                    vals[program_field_name] = program.id
+                try:
+                    card = card_model.create(vals)
+                except Exception as e:
+                    _logger.warning("[FIDELITE] Création carte échouée pour %s: %s", partner.name, str(e))
+                    continue
+            try:
+                card.write({point_field: rec.points_total or 0})
+                migrated += 1
+            except Exception as e:
+                _logger.warning("[FIDELITE] Écriture des points échouée pour %s: %s", partner.name, str(e))
+
+        _logger.info("[FIDELITE] Migration vers loyalty.card terminée: %s cartes mises à jour", migrated)
+        return True
 
     def action_ajouter_participant(self, partner_id):
         """Ajoute un participant à la mission."""
