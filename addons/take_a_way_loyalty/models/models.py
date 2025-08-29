@@ -9,6 +9,19 @@ _logger = logging.getLogger(__name__)
 # Log au chargement du module
 _logger.warning("[FIDELITE][DEBUG] Module take_a_way_loyalty chargé avec succès")
 
+class ProductTemplateAvailabilityWindow(models.Model):
+    _name = 'take_a_way_loyalty.product_availability_window'
+    _description = 'Fenêtre de disponibilité produit (répétition annuelle)'
+
+    product_tmpl_id = fields.Many2one('product.template', string='Produit', required=True, ondelete='cascade')
+    date_start = fields.Date(string='Début', required=True)
+    date_end = fields.Date(string='Fin', required=True)
+    repeat_yearly = fields.Boolean(string='Répéter chaque année', default=True)
+
+    _sql_constraints = [
+        ('check_dates', 'CHECK(date_start IS NOT NULL AND date_end IS NOT NULL)', 'Les dates doivent être renseignées.'),
+    ]
+
 class PointsUtilisateur(models.Model):
     _name = 'take_a_way_loyalty.points_utilisateur'
     _description = 'Points de fidélité des utilisateurs'
@@ -1821,6 +1834,56 @@ class ProductTemplate(models.Model):
     _inherit = 'product.template'
 
     disponibilite_inventaire = fields.Boolean(string='Disponible en inventaire', default=True)
+    disponibilite_window_ids = fields.One2many(
+        'take_a_way_loyalty.product_availability_window',
+        'product_tmpl_id',
+        string='Fenêtres de disponibilité'
+    )
+
+    def _is_date_in_window(self, date_to_check, date_start, date_end, repeat_yearly=True):
+        """Retourne True si date_to_check est dans [date_start, date_end].
+
+        - Si repeat_yearly est True, compare uniquement mois/jour (fenêtre récurrente annuelle).
+        - Gère les fenêtres chevauchant le changement d'année (ex: 01.12 -> 21.02).
+        """
+        if not date_start or not date_end:
+            return False
+
+        if not repeat_yearly:
+            return date_start <= date_to_check <= date_end
+
+        # Réduire aux (mois, jour)
+        md = (date_to_check.month, date_to_check.day)
+        ms = (date_start.month, date_start.day)
+        me = (date_end.month, date_end.day)
+
+        if ms <= me:
+            # Fenêtre normale dans la même année
+            return ms <= md <= me
+        # Fenêtre qui traverse le 31/12 -> 01/01
+        return md >= ms or md <= me
+
+    def _is_available_now_pos(self):
+        """Vérifie la disponibilité pour le PoS à l'instant T selon
+        - le booléen `disponibilite_inventaire`
+        - les éventuelles fenêtres de disponibilité (si aucune fenêtre, on ne restreint pas)
+        """
+        today = fields.Date.context_today(self)
+        result_by_id = {}
+        for tmpl in self:
+            available = bool(tmpl.disponibilite_inventaire)
+            if available and tmpl.disponibilite_window_ids:
+                # Disponible si l'une des fenêtres est active
+                in_any = False
+                for w in tmpl.disponibilite_window_ids:
+                    in_any = in_any or tmpl._is_date_in_window(today, w.date_start, w.date_end, w.repeat_yearly)
+                    if in_any:
+                        break
+                available = in_any
+            result_by_id[tmpl.id] = available
+        # Retourne un recordset des templates disponibles
+        available_ids = [tid for tid, ok in result_by_id.items() if ok]
+        return self.browse(available_ids)
 
     def _get_pos_products_domain(self):
         """Surcharge pour filtrer les produits disponibles dans le PoS"""
@@ -2023,7 +2086,7 @@ class PosSession(models.Model):
                     result['product.product']['data'] = filtered_dict
                     _logger.info("[DISPO_POS] load_data dict filtré: %s -> %s (exclus: %s)", before, len(filtered_dict), list(set(product_ids) - allowed_ids))
                 else:
-                    # Cas Odoo 18: data est une liste de lignes alignées avec 'fields'
+                    # Cas Odoo 18: data est une liste de lignes alignées avec 'fields' (ou dicts)
                     _logger.info("[DISPO_POS] products['data'] est une liste (%s), tentative de filtrage par fields", type(data_block))
                     fields_meta = products.get('fields')
                     if isinstance(fields_meta, list):
@@ -2080,19 +2143,12 @@ class PosSession(models.Model):
                                     elif isinstance(val, int):
                                         template_ids.append(val)
 
-                        # Construire un set d'ids produits désactivés (plus robuste)
-                        disabled_template_ids = set(
-                            self.env['product.template']
-                            .search([('disponibilite_inventaire', '=', False)])
-                            .ids
-                        )
-                        disabled_product_ids = set()
-                        if disabled_template_ids:
-                            disabled_product_ids = set(
-                                self.env['product.product']
-                                .search([('product_tmpl_id', 'in', list(disabled_template_ids))])
-                                .ids
-                            )
+                        # Évaluer la disponibilité actuelle par template
+                        tmpl_rs = self.env['product.template'].browse(list(set(template_ids)))
+                        available_tmpl_ids = set(tmpl_rs._is_available_now_pos().ids)
+                        disabled_template_ids = set(template_ids) - available_tmpl_ids
+                        # Récupérer les produits liés aux templates désactivés (pour filtre rapide par id produit)
+                        disabled_product_ids = set(self.env['product.product'].search([('product_tmpl_id', 'in', list(disabled_template_ids))]).ids)
 
                         filtered_rows = []
                         removed_count = 0
@@ -2203,6 +2259,11 @@ class ProductProduct(models.Model):
         products = self.search(domain)
         _logger.info("[DISPO_POS] Nombre de produits retournés: %s", len(products))
         
+        # Filtrer par fenêtres de disponibilité (niveau template)
+        if products:
+            templates = products.mapped('product_tmpl_id')
+            available_templates = templates._is_available_now_pos()
+            products = products.filtered(lambda p: p.product_tmpl_id.id in available_templates.ids)
         return products
 
     def _get_pos_products_domain_old(self):
