@@ -9,6 +9,19 @@ _logger = logging.getLogger(__name__)
 # Log au chargement du module
 _logger.warning("[FIDELITE][DEBUG] Module take_a_way_loyalty chargé avec succès")
 
+class ProductTemplateAvailabilityWindow(models.Model):
+    _name = 'take_a_way_loyalty.product_availability_window'
+    _description = 'Fenêtre de disponibilité produit (répétition annuelle)'
+
+    product_tmpl_id = fields.Many2one('product.template', string='Produit', required=True, ondelete='cascade')
+    date_start = fields.Date(string='Début', required=True)
+    date_end = fields.Date(string='Fin', required=True)
+    repeat_yearly = fields.Boolean(string='Répéter chaque année', default=True)
+
+    _sql_constraints = [
+        ('check_dates', 'CHECK(date_start IS NOT NULL AND date_end IS NOT NULL)', 'Les dates doivent être renseignées.'),
+    ]
+
 class PointsUtilisateur(models.Model):
     _name = 'take_a_way_loyalty.points_utilisateur'
     _description = 'Points de fidélité des utilisateurs'
@@ -1821,6 +1834,56 @@ class ProductTemplate(models.Model):
     _inherit = 'product.template'
 
     disponibilite_inventaire = fields.Boolean(string='Disponible en inventaire', default=True)
+    disponibilite_window_ids = fields.One2many(
+        'take_a_way_loyalty.product_availability_window',
+        'product_tmpl_id',
+        string='Fenêtres de disponibilité'
+    )
+
+    def _is_date_in_window(self, date_to_check, date_start, date_end, repeat_yearly=True):
+        """Retourne True si date_to_check est dans [date_start, date_end].
+
+        - Si repeat_yearly est True, compare uniquement mois/jour (fenêtre récurrente annuelle).
+        - Gère les fenêtres chevauchant le changement d'année (ex: 01.12 -> 21.02).
+        """
+        if not date_start or not date_end:
+            return False
+
+        if not repeat_yearly:
+            return date_start <= date_to_check <= date_end
+
+        # Réduire aux (mois, jour)
+        md = (date_to_check.month, date_to_check.day)
+        ms = (date_start.month, date_start.day)
+        me = (date_end.month, date_end.day)
+
+        if ms <= me:
+            # Fenêtre normale dans la même année
+            return ms <= md <= me
+        # Fenêtre qui traverse le 31/12 -> 01/01
+        return md >= ms or md <= me
+
+    def _is_available_now_pos(self):
+        """Vérifie la disponibilité pour le PoS à l'instant T selon
+        - le booléen `disponibilite_inventaire`
+        - les éventuelles fenêtres de disponibilité (si aucune fenêtre, on ne restreint pas)
+        """
+        today = fields.Date.context_today(self)
+        result_by_id = {}
+        for tmpl in self:
+            available = bool(tmpl.disponibilite_inventaire)
+            if available and tmpl.disponibilite_window_ids:
+                # Disponible si l'une des fenêtres est active
+                in_any = False
+                for w in tmpl.disponibilite_window_ids:
+                    in_any = in_any or tmpl._is_date_in_window(today, w.date_start, w.date_end, w.repeat_yearly)
+                    if in_any:
+                        break
+                available = in_any
+            result_by_id[tmpl.id] = available
+        # Retourne un recordset des templates disponibles
+        available_ids = [tid for tid, ok in result_by_id.items() if ok]
+        return self.browse(available_ids)
 
     def _get_pos_products_domain(self):
         """Surcharge pour filtrer les produits disponibles dans le PoS"""
@@ -1998,14 +2061,124 @@ class PosSession(models.Model):
         if 'product.product' in result:
             _logger.info("[DISPO_POS] Filtrage des produits dans load_data")
             products = result['product.product']
-            
+
             # Analyser le type et la structure
             _logger.info("[DISPO_POS] Type de products: %s", type(products))
             if isinstance(products, dict):
                 _logger.info("[DISPO_POS] Clés dans products: %s", list(products.keys()))
-                # Si c'est un dict, c'est probablement un cache ou une structure différente
-                # Ne pas filtrer pour l'instant, juste logger
-                _logger.info("[DISPO_POS] Structure dict détectée, pas de filtrage appliqué")
+                data_block = products.get('data')
+                if isinstance(data_block, dict):
+                    try:
+                        product_ids = [int(pid) for pid in data_block.keys()]
+                    except Exception:
+                        product_ids = list(data_block.keys())
+
+                    allowed_ids = set(
+                        self.env['product.product']
+                        .browse(product_ids)
+                        .filtered(lambda p: p.product_tmpl_id.disponibilite_inventaire)
+                        .ids
+                    )
+                    before = len(data_block)
+                    filtered_dict = {
+                        pid: vals for pid, vals in data_block.items() if (int(pid) if isinstance(pid, str) and pid.isdigit() else pid) in allowed_ids
+                    }
+                    result['product.product']['data'] = filtered_dict
+                    _logger.info("[DISPO_POS] load_data dict filtré: %s -> %s (exclus: %s)", before, len(filtered_dict), list(set(product_ids) - allowed_ids))
+                else:
+                    # Cas Odoo 18: data est une liste de lignes alignées avec 'fields' (ou dicts)
+                    _logger.info("[DISPO_POS] products['data'] est une liste (%s), tentative de filtrage par fields", type(data_block))
+                    fields_meta = products.get('fields')
+                    if isinstance(fields_meta, list):
+                        field_names = fields_meta
+                    elif isinstance(fields_meta, dict):
+                        field_names = list(fields_meta.keys())
+                    else:
+                        field_names = []
+
+                    # Debug: tracer les champs et un échantillon de ligne
+                    try:
+                        sample_row = data_block[0] if isinstance(data_block, list) and data_block else None
+                        _logger.info("[DISPO_POS] fields=%s", field_names)
+                        _logger.info("[DISPO_POS] sample_row_type=%s len=%s", type(sample_row), (len(sample_row) if isinstance(sample_row, (list, tuple)) else None))
+                        if isinstance(sample_row, (list, tuple)):
+                            _logger.info("[DISPO_POS] sample_row_first_8=%s", sample_row[:8])
+                    except Exception as e_dbg:
+                        _logger.warning("[DISPO_POS] Debug fields/sample_row logging error: %s", str(e_dbg))
+
+                    try:
+                        idx_id = field_names.index('id') if 'id' in field_names else -1
+                    except Exception:
+                        idx_id = -1
+                    try:
+                        idx_tmpl = field_names.index('product_tmpl_id') if 'product_tmpl_id' in field_names else -1
+                    except Exception:
+                        idx_tmpl = -1
+
+                    before = len(data_block) if isinstance(data_block, list) else 0
+
+                    if isinstance(data_block, list) and before:
+                        # Collecter les ids pertinents
+                        product_ids = []
+                        template_ids = []
+                        for row in data_block:
+                            if isinstance(row, dict):
+                                pid = row.get('id')
+                                if isinstance(pid, int):
+                                    product_ids.append(pid)
+                                v = row.get('product_tmpl_id')
+                                if isinstance(v, (list, tuple)) and v:
+                                    template_ids.append(v[0])
+                                elif isinstance(v, int):
+                                    template_ids.append(v)
+                            elif isinstance(row, (list, tuple)):
+                                if idx_id != -1 and idx_id < len(row):
+                                    pid = row[idx_id]
+                                    if isinstance(pid, int):
+                                        product_ids.append(pid)
+                                if idx_tmpl != -1 and idx_tmpl < len(row):
+                                    val = row[idx_tmpl]
+                                    if isinstance(val, (list, tuple)) and val:
+                                        template_ids.append(val[0])
+                                    elif isinstance(val, int):
+                                        template_ids.append(val)
+
+                        # Évaluer la disponibilité actuelle par template
+                        tmpl_rs = self.env['product.template'].browse(list(set(template_ids)))
+                        available_tmpl_ids = set(tmpl_rs._is_available_now_pos().ids)
+                        disabled_template_ids = set(template_ids) - available_tmpl_ids
+                        # Récupérer les produits liés aux templates désactivés (pour filtre rapide par id produit)
+                        disabled_product_ids = set(self.env['product.product'].search([('product_tmpl_id', 'in', list(disabled_template_ids))]).ids)
+
+                        filtered_rows = []
+                        removed_count = 0
+                        for row in data_block:
+                            keep = True
+                            if isinstance(row, dict):
+                                pid = row.get('id') if isinstance(row.get('id'), int) else None
+                                v = row.get('product_tmpl_id')
+                                tmpl_id = v[0] if isinstance(v, (list, tuple)) and v else (v if isinstance(v, int) else None)
+                                if pid is not None and pid in disabled_product_ids:
+                                    keep = False
+                                if tmpl_id is not None and tmpl_id in disabled_template_ids:
+                                    keep = False
+                            elif isinstance(row, (list, tuple)):
+                                if idx_id != -1 and idx_id < len(row) and isinstance(row[idx_id], int) and row[idx_id] in disabled_product_ids:
+                                    keep = False
+                                if idx_tmpl != -1 and idx_tmpl < len(row):
+                                    val = row[idx_tmpl]
+                                    tmpl_id = val[0] if isinstance(val, (list, tuple)) and val else (val if isinstance(val, int) else None)
+                                    if tmpl_id is not None and tmpl_id in disabled_template_ids:
+                                        keep = False
+                            if keep:
+                                filtered_rows.append(row)
+                            else:
+                                removed_count += 1
+
+                        result['product.product']['data'] = filtered_rows
+                        _logger.info("[DISPO_POS] load_data list filtré: %s -> %s (supprimés: %s, désactivés: prod=%s, tmpl=%s)", before, len(filtered_rows), removed_count, len(disabled_product_ids), len(disabled_template_ids))
+                    else:
+                        _logger.info("[DISPO_POS] Impossible de filtrer: fields=%s, idx_id=%s, idx_tmpl=%s", type(fields_meta), idx_id, idx_tmpl)
             elif isinstance(products, list):
                 _logger.info("[DISPO_POS] Nombre de produits dans la liste: %s", len(products))
                 if products:
@@ -2086,6 +2259,11 @@ class ProductProduct(models.Model):
         products = self.search(domain)
         _logger.info("[DISPO_POS] Nombre de produits retournés: %s", len(products))
         
+        # Filtrer par fenêtres de disponibilité (niveau template)
+        if products:
+            templates = products.mapped('product_tmpl_id')
+            available_templates = templates._is_available_now_pos()
+            products = products.filtered(lambda p: p.product_tmpl_id.id in available_templates.ids)
         return products
 
     def _get_pos_products_domain_old(self):
@@ -2130,19 +2308,74 @@ class ProductProduct(models.Model):
         # Filtrage défensif du résultat pour ne garder que les produits dont
         # le template est disponible en inventaire
         try:
-            if isinstance(result, list):
-                filtered = []
-                for product in result:
-                    if isinstance(product, dict):
-                        tmpl_field = product.get('product_tmpl_id')
-                        if tmpl_field:
-                            template_id = tmpl_field[0] if isinstance(tmpl_field, (list, tuple)) else tmpl_field
-                            template = self.env['product.template'].browse(template_id)
-                            if template.disponibilite_inventaire:
-                                filtered.append(product)
+            # Cas Odoo 18+: structure dict avec clés 'data', 'fields', 'relations'
+            if isinstance(result, dict) and 'data' in result:
+                data_block = result.get('data')
+                # data peut être un dict {product_id: row} ou une liste de rows
+                if isinstance(data_block, dict):
+                    # Filtrer via les ids de produits (plus robuste, agnostique du format interne des rows)
+                    try:
+                        product_ids = [int(pid) for pid in data_block.keys()]
+                    except Exception:
+                        # Si les clés ne sont pas castables en int, on les prend telles quelles
+                        product_ids = list(data_block.keys())
+
+                    allowed_ids = set(
+                        self.env['product.product']
+                        .browse(product_ids)
+                        .filtered(lambda p: p.product_tmpl_id.disponibilite_inventaire)
+                        .ids
+                    )
+                    before = len(data_block)
+                    result['data'] = {
+                        pid: vals for pid, vals in data_block.items() if (int(pid) if isinstance(pid, str) and pid.isdigit() else pid) in allowed_ids
+                    }
+                    _logger.info("[DISPO_POS] _load_pos_data dict filtré: %s -> %s", before, len(result['data']))
+
+                elif isinstance(data_block, list):
+                    # Fallback si 'data' est une liste alignée sur 'fields'
+                    fields = result.get('fields') or []
+                    try:
+                        tmpl_idx = fields.index('product_tmpl_id')
+                    except ValueError:
+                        tmpl_idx = -1
+                    filtered_rows = []
+                    before = len(data_block)
+                    for row in data_block:
+                        template_id = None
+                        if isinstance(row, (list, tuple)) and 0 <= tmpl_idx < len(row):
+                            val = row[tmpl_idx]
+                            if isinstance(val, (list, tuple)) and val:
+                                template_id = val[0]
+                            elif isinstance(val, int):
+                                template_id = val
+                        if template_id:
+                            if self.env['product.template'].browse(template_id).disponibilite_inventaire:
+                                filtered_rows.append(row)
                         else:
-                            filtered.append(product)
-                _logger.info("[DISPO_POS] _load_pos_data filtré: %s -> %s", len(result), len(filtered))
+                            # Si on ne sait pas déterminer le template, on ne filtre pas par prudence
+                            filtered_rows.append(row)
+                    result['data'] = filtered_rows
+                    _logger.info("[DISPO_POS] _load_pos_data list filtré: %s -> %s", before, len(filtered_rows))
+
+                # Toujours retourner la structure dict attendue par le client PoS
+                return result
+
+            if isinstance(result, list):
+                # Format classique: liste de dicts sérialisés
+                product_ids = []
+                for product in result:
+                    if isinstance(product, dict) and product.get('id'):
+                        product_ids.append(product['id'])
+                allowed_ids = set(
+                    self.env['product.product']
+                    .browse(product_ids)
+                    .filtered(lambda p: p.product_tmpl_id.disponibilite_inventaire)
+                    .ids
+                )
+                filtered = [p for p in result if not isinstance(p, dict) or not p.get('id') or p.get('id') in allowed_ids]
+                _logger.info("[DISPO_POS] _load_pos_data list filtré par ids: %s -> %s (exclus: %s)",
+                             len(result), len(filtered), list(set(product_ids) - allowed_ids))
                 return filtered
         except Exception as e:
             _logger.error("[DISPO_POS] Erreur durant le filtrage _load_pos_data: %s", str(e))
