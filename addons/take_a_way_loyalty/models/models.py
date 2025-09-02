@@ -125,7 +125,9 @@ class Mission(models.Model):
         for order in recent_orders:
             _logger.warning("[FIDELITE][DEBUG] Commande: %s - Partenaire: %s - Statut: %s", 
                            order.id, order.partner_id.name if order.partner_id else "Aucun", order.state)
-            order._check_missions()
+            # Lors du test générique, ignorer les missions cumulables pour éviter l'attribution
+            # de points liée aux répétitions
+            order.with_context(skip_cumulable_missions=True)._check_missions()
         
         return {
             'type': 'ir.actions.client',
@@ -398,15 +400,15 @@ class Mission(models.Model):
                 
                 # Premier appel
                 _logger.info("  - Premier appel à _check_missions...")
-                order._check_missions(order)
+                order._check_missions()
                 
                 # Deuxième appel (devrait être ignoré)
                 _logger.info("  - Deuxième appel à _check_missions...")
-                order._check_missions(order)
+                order._check_missions()
                 
                 # Troisième appel (devrait être ignoré)
                 _logger.info("  - Troisième appel à _check_missions...")
-                order._check_missions(order)
+                order._check_missions()
                 
                 _logger.info("  - Test réussi ✅")
                 
@@ -503,6 +505,10 @@ class MissionUser(models.Model):
         'mission_user_id',
         string='Progression par période'
     )
+    # Compteurs pour la traçabilité et la prévention des doubles récompenses
+    completions_count = fields.Integer(string='Succès (nb fois)', default=0)
+    rewards_count = fields.Integer(string='Récompensé (nb fois)', default=0)
+    last_rewarded_at = fields.Datetime(string='Dernière récompense')
 
     _sql_constraints = [
         ('unique_mission_user', 'UNIQUE(mission_id, utilisateur_id)', 
@@ -630,6 +636,7 @@ class MissionUser(models.Model):
 
         # Marquer temporairement comme terminé pour éviter les appels multiples
         mission_user.etat = 'termine'
+        mission_user.completions_count = (mission_user.completions_count or 0) + 1
         
         try:
             # Attribuer les points de récompense
@@ -645,14 +652,20 @@ class MissionUser(models.Model):
             # Log détaillé pour tracer l'attribution des points
             points_avant = points_record.points_total
             points_a_ajouter = mission_user.mission_id.point_recompense
-            points_record.points_total += points_a_ajouter
+            # Si déjà récompensé au moins autant de fois que les succès, ne pas doubler
+            if (mission_user.rewards_count or 0) >= (mission_user.completions_count or 0):
+                _logger.info("[FIDELITE] Récompense déjà attribuée pour cette completion, aucun point ajouté")
+            else:
+                points_record.points_total += points_a_ajouter
+                mission_user.rewards_count = (mission_user.rewards_count or 0) + 1
+                mission_user.last_rewarded_at = fields.Datetime.now()
             points_apres = points_record.points_total
             
             _logger.info("[FIDELITE] Attribution des points pour la mission '%s'", mission_user.mission_id.name)
             _logger.info("[FIDELITE] Utilisateur: %s", mission_user.utilisateur_id.name)
             _logger.info("[FIDELITE] Points avant: %s", points_avant)
             _logger.info("[FIDELITE] Points à ajouter: %s", points_a_ajouter)
-            _logger.info("[FIDELITE] Points après: %s", points_apres)
+            _logger.info("[FIDELITE] Points après: %s", points_record.points_total)
             _logger.info("[FIDELITE] Mission cumulable: %s", mission_user.mission_id.cumulable)
 
             # Créditer aussi la carte de fidélité native Odoo si disponible
@@ -1144,7 +1157,7 @@ class PosOrder(models.Model):
             _logger.warning("[FIDELITE][DEBUG] Valeurs de write: %s", vals)
             for order in self:
                 _logger.warning("[FIDELITE][DEBUG] _check_missions appelée pour order %s", order.id)
-                order._check_missions(order)
+                order._check_missions()
         
         return orders
 
@@ -1165,7 +1178,7 @@ class PosOrder(models.Model):
         # Vérifier les missions après le paiement
         for order in self:
             _logger.warning("[FIDELITE][DEBUG] Commande POS %s passée au statut 'paid', appel de _check_missions", order.id)
-            order._check_missions(order)
+            order._check_missions()
         
         return result
 
@@ -1177,7 +1190,7 @@ class PosOrder(models.Model):
         # Vérifier les missions après la facturation
         for order in self:
             _logger.warning("[FIDELITE][DEBUG] Commande POS %s passée au statut 'invoiced', appel de _check_missions", order.id)
-            order._check_missions(order)
+            order._check_missions()
         
         return result
 
@@ -1192,11 +1205,16 @@ class PosOrder(models.Model):
             # Vérifier les missions seulement si la commande est déjà payée
             if order.state in ['paid', 'done', 'invoiced']:
                 _logger.warning("[FIDELITE][DEBUG] Commande POS %s créée avec statut de paiement, appel de _check_missions", order.id)
-                order._check_missions(order)
+                order._check_missions()
         
         return orders
 
-    def _check_missions(self, order):
+    def _check_missions(self):
+        """Vérifie les missions pour un ou plusieurs enregistrements POS"""
+        for order in self:
+            self._check_missions_single(order)
+
+    def _check_missions_single(self, order):
         """Vérifie les missions pour une commande POS"""
         _logger.warning("[FIDELITE][DEBUG] _check_missions appelée pour order %s", order.id)
         
@@ -1243,7 +1261,11 @@ class PosOrder(models.Model):
         _logger.warning("[FIDELITE][DEBUG] Vérification des missions pour l'utilisateur: %s (ID: %s)", 
                        order.partner_id.name, order.partner_id.id)
 
+        skip_cumulable = self.env.context.get('skip_cumulable_missions')
         for mission in missions_periode:
+            if skip_cumulable and mission.cumulable:
+                _logger.info("[FIDELITE] Mission cumulable ignorée dans le test générique: %s", mission.name)
+                continue
             _logger.warning("[FIDELITE][DEBUG] Vérification de la mission: %s", mission.name)
 
             # Vérifier si l'utilisateur participe à cette mission

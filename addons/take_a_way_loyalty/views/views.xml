@@ -401,6 +401,9 @@
                         <field name="date_debut"/>
                         <field name="progression"/>
                         <field name="etat"/>
+                        <field name="completions_count"/>
+                        <field name="rewards_count"/>
+                        <field name="last_rewarded_at"/>
                     </group>
                     <notebook>
                         <page string="Progression par produit">
