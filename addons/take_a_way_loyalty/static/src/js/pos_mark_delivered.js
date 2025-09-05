@@ -104,9 +104,61 @@ function posReferenceFromOrdersList() {
     return m ? m[0] : null;
 }
 
-function notify(message) {
-    // eslint-disable-next-line no-alert
-    console.info('[TAKE_A_WAY] notify:', message);
+function ensureToastContainer() {
+    let c = document.getElementById('taw-toast-container');
+    if (!c) {
+        c = document.createElement('div');
+        c.id = 'taw-toast-container';
+        c.style.position = 'fixed';
+        c.style.right = '16px';
+        c.style.bottom = '16px';
+        c.style.zIndex = '2147483647';
+        c.style.display = 'flex';
+        c.style.flexDirection = 'column';
+        c.style.gap = '8px';
+        document.body.appendChild(c);
+    }
+    return c;
+}
+
+function showToast(message, type = 'success') {
+    const COLORS = {
+        success: '#198754',
+        warning: '#ffc107',
+        danger: '#dc3545',
+        info: '#0dcaf0',
+    };
+    const container = ensureToastContainer();
+    const toast = document.createElement('div');
+    toast.style.background = '#ffffff';
+    toast.style.color = '#333';
+    toast.style.border = '1px solid #ddd';
+    toast.style.borderLeft = `4px solid ${COLORS[type] || COLORS.info}`;
+    toast.style.borderRadius = '8px';
+    toast.style.padding = '10px 12px';
+    toast.style.minWidth = '240px';
+    toast.style.maxWidth = '420px';
+    toast.style.boxShadow = '0 2px 12px rgba(0,0,0,0.12)';
+    toast.style.fontSize = '14px';
+    toast.style.opacity = '1';
+    toast.style.transition = 'opacity 0.3s ease';
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 300);
+    }, 2500);
+}
+
+function notify(message, type = 'success') {
+    // eslint-disable-next-line no-console
+    console.info('[TAKE_A_WAY] notify:', message, type);
+    try {
+        showToast(message, type);
+    } catch (e) {
+        // eslint-disable-next-line no-console
+        console.info('[TAKE_A_WAY] Fallback toast error, message:', message);
+    }
 }
 
 // DOM fallback: if the framework override fails, inject a real button next to existing ones
@@ -133,9 +185,13 @@ function ensureDomButton() {
             // eslint-disable-next-line no-console
             console.info('[TAKE_A_WAY] DOM RPC response', res);
             if (res && res.ok) {
-                notify('Commande marquée comme livrée');
+                notify('Commande marquée comme livrée', 'success');
             } else {
-                notify("Impossible de marquer la commande comme livrée");
+                if (res && res.error === 'already_delivered') {
+                    notify('Commande déjà livrée', 'warning');
+                } else {
+                    notify('Impossible de marquer la commande comme livrée', 'danger');
+                }
             }
         } catch (e) {
             // eslint-disable-next-line no-console

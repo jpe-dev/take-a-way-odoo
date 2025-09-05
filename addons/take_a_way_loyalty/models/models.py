@@ -1161,6 +1161,9 @@ class PosOrder(models.Model):
         ne pas perturber les autres logiques (compta, fidélité, etc.).
         """
         for order in self:
+            # Idempotent: ne rien faire si déjà livré
+            if order.delivery_state == 'delivered':
+                continue
             order.write({
                 'delivery_state': 'delivered',
                 'delivered_at': fields.Datetime.now(),
@@ -1183,6 +1186,14 @@ class PosOrder(models.Model):
             order = self.search(domain_like, limit=1)
         if not order:
             return {'ok': False, 'error': 'order_not_found'}
+        if order.delivery_state == 'delivered':
+            return {
+                'ok': False,
+                'error': 'already_delivered',
+                'id': order.id,
+                'delivery_state': order.delivery_state,
+                'delivered_at': order.delivered_at,
+            }
         order.action_mark_delivered()
         return {
             'ok': True,
