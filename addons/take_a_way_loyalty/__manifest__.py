@@ -33,6 +33,7 @@
     'assets': {
         'point_of_sale._assets_pos': [
             'take_a_way_loyalty/static/src/js/pos_order_list_column.js',
+            'take_a_way_loyalty/static/src/js/pos_mark_delivered.js',
         ],
     },
     # only loaded in demonstration mode

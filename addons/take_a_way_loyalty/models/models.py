@@ -1141,6 +1141,55 @@ class PosOrder(models.Model):
 
     # Heure prévue (modifiable après création depuis le backend)
     heure_prevue = fields.Datetime(string='Heure prévue', help='Heure prévue de préparation / retrait / livraison')
+    # Statut de livraison spécifique au flux Food Truck
+    delivery_state = fields.Selection(
+        selection=[
+            ('pending', 'À livrer'),
+            ('delivered', 'Livré'),
+        ],
+        string='Statut de livraison',
+        default='pending',
+        help="Statut opérationnel côté Food Truck. Ne remplace pas le statut comptable ('payé', 'facturé', etc.).",
+        tracking=True,
+    )
+    delivered_at = fields.Datetime(string='Heure de livraison', help="Horodatage de passage en 'Livré'")
+
+    def action_mark_delivered(self):
+        """Marque la ou les commandes comme livrées.
+
+        Cette action n'affecte pas le champ 'state' standard du PoS afin de
+        ne pas perturber les autres logiques (compta, fidélité, etc.).
+        """
+        for order in self:
+            order.write({
+                'delivery_state': 'delivered',
+                'delivered_at': fields.Datetime.now(),
+            })
+        return True
+
+    @api.model
+    def mark_delivered_by_reference(self, pos_reference):
+        """Utilitaire appelé depuis l'UI PoS via RPC.
+
+        Recherche par `pos_reference` et marque livré si trouvé.
+        Retourne un dict simple pour la consommation JS.
+        """
+        # Essayer une recherche stricte, puis plus souple (ilike) car la référence
+        # peut être préfixée (ex: "Commande 00003-003-0005").
+        domain_exact = [('pos_reference', '=', pos_reference)]
+        domain_like = [('pos_reference', 'ilike', pos_reference or '')]
+        order = self.search(domain_exact, limit=1)
+        if not order and pos_reference:
+            order = self.search(domain_like, limit=1)
+        if not order:
+            return {'ok': False, 'error': 'order_not_found'}
+        order.action_mark_delivered()
+        return {
+            'ok': True,
+            'id': order.id,
+            'delivery_state': order.delivery_state,
+            'delivered_at': order.delivered_at,
+        }
 
     def _check_missions_manual(self):
         """Méthode manuelle pour déclencher la vérification des missions"""

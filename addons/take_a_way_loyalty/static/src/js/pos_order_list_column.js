@@ -6,6 +6,7 @@ let rootObserver = null;
 let listObserver = null;
 
 const RECEIPT_HEADER_HINTS = ['Numéro de reçu', 'Receipt', 'Reçu', 'Order', 'Commande'];
+const STATUS_HEADER_HINTS = ['Statut', 'Status'];
 
 const HEADER_SELECTORS = [
   '.orders .header-row',
@@ -30,7 +31,7 @@ function q1(selectors, root) {
 function qAll(selectors, root) {
   for (const s of selectors) {
     const els = (root || document).querySelectorAll(s);
-    if (els && els.length) return els;
+    if (els && els.length) return Array.from(els);
   }
   return [];
 }
@@ -99,6 +100,19 @@ function receiptColIndex(root) {
   return 1;
 }
 
+function statusColIndex(root) {
+  const tr = q1(HEADER_SELECTORS, root);
+  const cells = headerCells(tr);
+  if (!cells.length) return 6; // fallback near original position
+  for (let i = 0; i < cells.length; i++) {
+    const t = (cells[i].textContent || '').trim();
+    if (t && STATUS_HEADER_HINTS.some(h => t.toLowerCase().includes(h.toLowerCase()))) {
+      return i;
+    }
+  }
+  return Math.min(6, cells.length - 1);
+}
+
 function collectRefs(root) {
   const rows = qAll(ROW_SELECTORS, root);
   const idx = receiptColIndex(root);
@@ -112,7 +126,7 @@ function collectRefs(root) {
   return out;
 }
 
-async function fetchHeures(refs) {
+async function fetchOrderMeta(refs) {
   if (!refs.length) return [];
   const uniq = Array.from(new Set(refs.map(r => r.ref)));
   const payload = {
@@ -121,7 +135,7 @@ async function fetchHeures(refs) {
     params: {
       model: 'pos.order',
       method: 'search_read',
-      args: [[['pos_reference', 'in', uniq]], ['pos_reference', 'heure_prevue']],
+      args: [[['pos_reference', 'in', uniq]], ['pos_reference', 'heure_prevue', 'delivery_state']],
       kwargs: {},
     },
   };
@@ -155,11 +169,29 @@ async function updateValues(root) {
     const cell = row.querySelector('.heure-prevue-cell');
     if (cell) map.set(ref, cell);
   }
-  const recs = await fetchHeures(pairs);
+  const recs = await fetchOrderMeta(pairs);
   for (const rec of recs) {
     const key = (rec.pos_reference || '').replace(/\s+/g, ' ').trim();
     const cell = map.get(key);
     if (cell) cell.textContent = fmtHHMM(rec.heure_prevue);
+
+    // Mettre à jour la colonne Statut -> "Livré" si delivery_state = delivered
+    if (rec.delivery_state === 'delivered') {
+      const rows = qAll(ROW_SELECTORS, root);
+      const idxRec = rows.findIndex((row) => {
+        const cells = rowCells(row);
+        const ridx = receiptColIndex(root);
+        const txt = (cells[Math.min(ridx, cells.length - 1)]?.textContent || '').replace(/\s+/g, ' ').trim();
+        return txt.includes(key);
+      });
+      if (idxRec >= 0) {
+        const row = rows[idxRec];
+        const cells = rowCells(row);
+        const sIdx = statusColIndex(root);
+        const sCell = cells[Math.min(sIdx, cells.length - 1)];
+        if (sCell) sCell.textContent = 'Livré';
+      }
+    }
   }
 }
 
